@@ -1,5 +1,5 @@
 #requirements
-pip install yfinance ta-lib scikit-learn binance
+1. pip install yfinance ta-lib scikit-learn binance
 #process and fitur
 1. Mengumpulkan Data Pasar: Data pasar untuk simbol tertentu (misalnya, BTC-USD) dikumpulkan menggunakan yfinance. Data ini mencakup harga historis dalam interval tertentu (misalnya, 1 jam selama 1 bulan).
 
@@ -12,7 +12,7 @@ pip install yfinance ta-lib scikit-learn binance
 5. Eksekusi Order: Bot mengeksekusi order beli atau jual melalui API Binance, tergantung pada keputusan yang diambil.
 
 #use
-python3 bot.py
+1. python3 bot.py
 
 # warning
 Risiko: Trading kripto sangat berisiko, dan bot trading dapat menghasilkan kerugian.

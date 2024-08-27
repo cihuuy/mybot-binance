@@ -1,5 +1,5 @@
 #requirements
-1. pip install yfinance ta-lib scikit-learn binance
+  pip install yfinance ta-lib scikit-learn binance
 #process and fitur
 1. Mengumpulkan Data Pasar: Data pasar untuk simbol tertentu (misalnya, BTC-USD) dikumpulkan menggunakan yfinance. Data ini mencakup harga historis dalam interval tertentu (misalnya, 1 jam selama 1 bulan).
 

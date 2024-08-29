@@ -8,7 +8,7 @@ from sklearn.metrics import accuracy_score
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import time
-import requests
+import pickle
 from datetime import datetime
 
 # Mendapatkan waktu pasar dari Binance API
@@ -77,7 +77,24 @@ def train_ai_model(data):
     
     print(f"Model accuracy: {accuracy * 100:.2f}%")
     
+    # Simpan model dan scaler
+    with open('trading_model.pkl', 'wb') as model_file:
+        pickle.dump(model, model_file)
+    with open('scaler.pkl', 'wb') as scaler_file:
+        pickle.dump(scaler, scaler_file)
+    
     return model, scaler
+
+# Memuat model dan scaler yang disimpan
+def load_model_and_scaler():
+    try:
+        with open('trading_model.pkl', 'rb') as model_file:
+            model = pickle.load(model_file)
+        with open('scaler.pkl', 'rb') as scaler_file:
+            scaler = pickle.load(scaler_file)
+        return model, scaler
+    except FileNotFoundError:
+        return None, None
 
 # Mengecek saldo akun sebelum melakukan trading dan menyesuaikan kuantitas
 def check_balance(symbol, quantity, action, client):
@@ -169,7 +186,9 @@ def run_trading_bot(market_symbol, trade_symbol, quantity, client):
         data = get_market_data(market_symbol)
         data = add_technical_indicators(data)
         
-        model, scaler = train_ai_model(data)
+        model, scaler = load_model_and_scaler()
+        if model is None or scaler is None:
+            model, scaler = train_ai_model(data)
         
         action = make_trade_decision(data, model, scaler)
         

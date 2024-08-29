@@ -51,12 +51,23 @@ def train_ai_model(data):
     
     return model, scaler
 
-# Mengecek saldo akun sebelum melakukan trading
+# Mengecek saldo akun sebelum melakukan trading dan menyesuaikan kuantitas
 def check_balance(symbol, quantity, action, client):
     asset = symbol.replace("USDT", "")
     balances = client.get_asset_balance(asset=asset)
-    if balances is None or float(balances['free']) < quantity:
-        raise ValueError(f"Saldo tidak mencukupi untuk melakukan {action} {quantity} {asset}. Saldo saat ini: {balances['free']} {asset}")
+    if balances is None:
+        raise ValueError(f"Tidak dapat mengambil saldo untuk {asset}.")
+    
+    available_balance = float(balances['free'])
+    
+    if available_balance < quantity:
+        if action == 'Sell':
+            print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
+            quantity = available_balance
+        else:
+            raise ValueError(f"Saldo tidak mencukupi untuk membeli {quantity} {asset}. Saldo saat ini: {available_balance} {asset}")
+    
+    return quantity
 
 # Membuat keputusan trading
 def make_trade_decision(data, model, scaler):
@@ -74,7 +85,7 @@ def make_trade_decision(data, model, scaler):
 
 # Eksekusi order trading
 def execute_trade(action, symbol, quantity, client):
-    check_balance(symbol, quantity, action, client)
+    quantity = check_balance(symbol, quantity, action, client)
     
     if action == 'Buy':
         order = client.order_market_buy(symbol=symbol, quantity=quantity)

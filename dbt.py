@@ -106,11 +106,20 @@ def check_balance(symbol, quantity, action, client):
     
     available_balance = float(balances['free'])
     
-    if available_balance < quantity:
-        if action == 'Sell':
+    if action == 'Sell':
+        # Pastikan saldo memenuhi batas minimum lot size untuk penjualan
+        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
+        if lot_size_info is not None:
+            min_qty = float(lot_size_info['minQty'])
+            if available_balance < min_qty:
+                print(f"Saldo DOGE tidak mencukupi untuk menjual. Saldo saat ini: {available_balance} DOGE")
+                return None  # Menghindari eksekusi order jual
+        if available_balance < quantity:
             print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
             quantity = available_balance
-        else:
+    
+    elif action == 'Buy':
+        if available_balance < quantity:
             raise ValueError(f"Saldo tidak mencukupi untuk membeli {quantity} {asset}. Saldo saat ini: {available_balance} {asset}")
     
     return quantity
@@ -155,8 +164,10 @@ def make_trade_decision(data, model, scaler):
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
     if action == 'Buy':
-        # Menggunakan saldo USDT untuk membeli DOGE
         quantity = check_balance('USDT', quantity, action, client)
+        if quantity is None:
+            print("Tidak cukup saldo USDT untuk membeli.")
+            return
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
@@ -166,6 +177,9 @@ def execute_trade(action, symbol, quantity, client):
             order = None
     elif action == 'Sell':
         quantity = check_balance(symbol, quantity, action, client)
+        if quantity is None:
+            print("Tidak cukup saldo DOGE untuk menjual.")
+            return
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_sell(symbol=symbol, quantity=quantity)

@@ -154,20 +154,26 @@ def make_trade_decision(data, model, scaler):
 # Eksekusi order trading
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
-    quantity = check_balance(symbol, quantity, action, client)
-    quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
-    
-    try:
-        if action == 'Buy':
+    if action == 'Buy':
+        # Menggunakan saldo USDT untuk membeli DOGE
+        quantity = check_balance('USDT', quantity, action, client)
+        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+        try:
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
-        elif action == 'Sell':
+            print(f"Executed Buy order: {order}")
+        except BinanceAPIException as e:
+            print(f"Error saat eksekusi trade: {e}")
+            order = None
+    elif action == 'Sell':
+        quantity = check_balance(symbol, quantity, action, client)
+        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+        try:
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
-        
-        print(f"Executed {action} order: {order}")
-        return order
-    except BinanceAPIException as e:
-        print(f"Error saat eksekusi trade: {e}")
-        return None
+            print(f"Executed Sell order: {order}")
+        except BinanceAPIException as e:
+            print(f"Error saat eksekusi trade: {e}")
+            order = None
+    return order
 
 # Menjalankan bot trading
 def run_trading_bot(market_symbol, trade_symbol, quantity, client):

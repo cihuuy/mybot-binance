@@ -194,7 +194,10 @@ def run_trading_bot(market_symbol, trade_symbol, quantity, client):
         
         model, scaler = load_model_and_scaler()
         if model is None or scaler is None:
+            print("Model atau scaler tidak ditemukan. Melatih model...")
             model, scaler = train_ai_model(data)
+        else:
+            print("Model dan scaler ditemukan. Menggunakan model yang ada.")
         
         action = make_trade_decision(data, model, scaler)
         

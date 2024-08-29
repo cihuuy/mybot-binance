@@ -1,8 +1,8 @@
 import yfinance as yf
 import talib
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from binance.client import Client
@@ -10,7 +10,7 @@ from binance.exceptions import BinanceAPIException
 import time
 
 # Mendapatkan data pasar dari yfinance
-def get_market_data(symbol, period='1mo', interval='1h'):
+def get_market_data(symbol, period='1y', interval='1h'):
     data = yf.download(symbol, period=period, interval=interval)
     if data.empty:
         raise ValueError(f"Data untuk simbol {symbol} tidak ditemukan atau kosong.")
@@ -20,15 +20,18 @@ def get_market_data(symbol, period='1mo', interval='1h'):
 def add_technical_indicators(data):
     data['SMA'] = talib.SMA(data['Close'], timeperiod=20)
     data['RSI'] = talib.RSI(data['Close'], timeperiod=14)
+    data['MACD'], data['MACD_SIGNAL'], data['MACD_HIST'] = talib.MACD(data['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
+    data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['Close'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
+    data['ATR'] = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14)
     return data
 
-# Melatih model AI
+# Melatih model AI dengan GridSearchCV untuk parameter tuning
 def train_ai_model(data):
     data = data.dropna()
     if data.empty:
         raise ValueError("Data setelah penambahan indikator teknikal kosong.")
     
-    X = data[['SMA', 'RSI']]
+    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']]
     y = (data['Close'].shift(-1) > data['Close']).astype(int)
     
     if X.empty or y.empty:
@@ -36,15 +39,21 @@ def train_ai_model(data):
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
-    if X_train.size == 0 or X_test.size == 0:
-        raise ValueError("Dataset pelatihan atau pengujian kosong setelah train_test_split.")
-    
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
     
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    # Hyperparameter tuning untuk Gradient Boosting
+    param_grid = {
+        'n_estimators': [100, 200],
+        'learning_rate': [0.01, 0.1, 0.2],
+        'max_depth': [3, 5, 7]
+    }
+    
+    grid_search = GridSearchCV(GradientBoostingClassifier(), param_grid, cv=3, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    
+    model = grid_search.best_estimator_
     
     predictions = model.predict(X_test)
     accuracy = accuracy_score(y_test, predictions)
@@ -96,7 +105,7 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
 
 # Membuat keputusan trading
 def make_trade_decision(data, model, scaler):
-    X = data[['SMA', 'RSI']].dropna()
+    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
     X_scaled = scaler.transform(X)
     prediction = model.predict(X_scaled[-1:])
     

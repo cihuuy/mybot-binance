@@ -11,7 +11,13 @@ import time
 import requests
 from datetime import datetime
 
-# Mendapatkan waktu server dari API
+# Mendapatkan waktu pasar dari Binance API
+def get_market_time(client):
+    server_time = client.get_server_time()
+    market_time = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
+    return market_time
+
+# Mendapatkan waktu server dari API Binance
 def get_server_time(client):
     server_time = client.get_server_time()
     server_datetime = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
@@ -150,7 +156,15 @@ def execute_trade(action, symbol, quantity, client):
 def run_trading_bot(market_symbol, trade_symbol, quantity, client):
     try:
         server_time = get_server_time(client)
+        market_time = get_market_time(client)
+        
         print(f"Server time: {server_time}")
+        print(f"Market time: {market_time}")
+        
+        # Check if server time and market time are sufficiently close
+        if abs((server_time - market_time).total_seconds()) > 60:
+            print("Perbedaan waktu antara server dan pasar terlalu besar. Proses trading dihentikan.")
+            return
         
         data = get_market_data(market_symbol)
         data = add_technical_indicators(data)

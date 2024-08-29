@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from binance.client import Client
+from binance.exceptions import BinanceAPIException
 
 # Mendapatkan data pasar dari yfinance
 def get_market_data(symbol, period='1mo', interval='1h'):
@@ -69,6 +70,29 @@ def check_balance(symbol, quantity, action, client):
     
     return quantity
 
+# Menyesuaikan kuantitas agar sesuai dengan LOT_SIZE
+def adjust_quantity_to_lot_size(symbol, quantity, client):
+    exchange_info = client.get_symbol_info(symbol)
+    lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', exchange_info['filters']), None)
+    
+    if lot_size_info is not None:
+        min_qty = float(lot_size_info['minQty'])
+        max_qty = float(lot_size_info['maxQty'])
+        step_size = float(lot_size_info['stepSize'])
+        
+        # Pastikan kuantitas sesuai dengan LOT_SIZE
+        if quantity < min_qty:
+            quantity = min_qty
+        elif quantity > max_qty:
+            quantity = max_qty
+        else:
+            # Menyesuaikan kuantitas agar sesuai dengan step_size
+            quantity = (quantity // step_size) * step_size
+        
+        quantity = round(quantity, len(str(step_size).split('.')[1]))
+    
+    return quantity
+
 # Membuat keputusan trading
 def make_trade_decision(data, model, scaler):
     X = data[['SMA', 'RSI']].dropna()
@@ -86,14 +110,19 @@ def make_trade_decision(data, model, scaler):
 # Eksekusi order trading
 def execute_trade(action, symbol, quantity, client):
     quantity = check_balance(symbol, quantity, action, client)
+    quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
     
-    if action == 'Buy':
-        order = client.order_market_buy(symbol=symbol, quantity=quantity)
-    elif action == 'Sell':
-        order = client.order_market_sell(symbol=symbol, quantity=quantity)
-    
-    print(f"Executed {action} order: {order}")
-    return order
+    try:
+        if action == 'Buy':
+            order = client.order_market_buy(symbol=symbol, quantity=quantity)
+        elif action == 'Sell':
+            order = client.order_market_sell(symbol=symbol, quantity=quantity)
+        
+        print(f"Executed {action} order: {order}")
+        return order
+    except BinanceAPIException as e:
+        print(f"Error saat eksekusi trade: {e}")
+        return None
 
 # Menjalankan bot trading
 def run_trading_bot(market_symbol, trade_symbol, quantity, client):

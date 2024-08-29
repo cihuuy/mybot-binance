@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+import time
 
 # Mendapatkan data pasar dari yfinance
 def get_market_data(symbol, period='1mo', interval='1h'):
@@ -126,18 +127,28 @@ def execute_trade(action, symbol, quantity, client):
 
 # Menjalankan bot trading
 def run_trading_bot(market_symbol, trade_symbol, quantity, client):
-    data = get_market_data(market_symbol)
-    data = add_technical_indicators(data)
-    
-    model, scaler = train_ai_model(data)
-    
-    action = make_trade_decision(data, model, scaler)
-    
-    execute_trade(action, trade_symbol, quantity, client)
+    try:
+        data = get_market_data(market_symbol)
+        data = add_technical_indicators(data)
+        
+        model, scaler = train_ai_model(data)
+        
+        action = make_trade_decision(data, model, scaler)
+        
+        execute_trade(action, trade_symbol, quantity, client)
+    except Exception as e:
+        print(f"Terjadi kesalahan: {e}")
+
+# Loop untuk menjalankan bot secara otomatis
+def start_bot(market_symbol, trade_symbol, quantity, client, interval=3600):
+    while True:
+        print("Memulai siklus trading...")
+        run_trading_bot(market_symbol, trade_symbol, quantity, client)
+        print(f"Menunggu {interval / 60} menit sebelum siklus berikutnya...")
+        time.sleep(interval)
 
 # Sampel eksekusi
 if __name__ == "__main__":
     client = Client('h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
-
     # Menjalankan bot dengan simbol yang benar untuk yfinance dan Binance untuk DOGE/USDT
-    run_trading_bot('DOGE-USD', 'DOGEUSDT', 100, client)
+    start_bot('DOGE-USD', 'DOGEUSDT', 100, client)

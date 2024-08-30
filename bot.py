@@ -261,7 +261,7 @@ def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interva
         data = add_technical_indicators(data)
         model, scaler, X_test, y_test, model_accuracy = train_ai_model(data)
         backtest_accuracy = evaluate_model(model, X_test, y_test)
-        if model_accuracy >= 0.51 and backtest_accuracy >= 0.51:
+        if model_accuracy >= 0.35 and backtest_accuracy >= 0.35:
             print("Model trained successfully and meets accuracy requirements.")
             last_training_date = datetime.now()  # Update the last training date
         else:

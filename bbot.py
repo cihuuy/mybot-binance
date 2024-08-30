@@ -10,20 +10,16 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import time
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# Mendapatkan waktu pasar dari Binance API
 def get_market_time(client):
     server_time = client.get_server_time()
     market_time = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
     return market_time
 
-# Mendapatkan data pasar dari Binance API
 def get_market_data(symbol, client, interval='1h', limit=1000):
     print(f"Downloading market data for {symbol} using Binance API...")
-    
     klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-    
     if not klines:
         raise ValueError(f"Data untuk simbol {symbol} tidak ditemukan atau kosong.")
     
@@ -50,7 +46,6 @@ def get_market_data(symbol, client, interval='1h', limit=1000):
     
     return data
 
-# Menambahkan indikator teknikal
 def add_technical_indicators(data):
     print("Adding technical indicators...")
     data['SMA'] = talib.SMA(data['Close'], timeperiod=20)
@@ -60,7 +55,6 @@ def add_technical_indicators(data):
     data['ATR'] = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14)
     return data
 
-# Melatih model AI dengan GridSearchCV dan TimeSeriesSplit
 def train_ai_model(data):
     print("Training AI model...")
     data = data.dropna()
@@ -104,74 +98,28 @@ def train_ai_model(data):
     
     return model, scaler, X_test, y_test
 
-# Memuat model dan scaler yang disimpan
 def load_model_and_scaler():
     try:
         with open('trading_model.pkl', 'rb') as model_file:
             model = pickle.load(model_file)
         with open('scaler.pkl', 'rb') as scaler_file:
             scaler = pickle.load(scaler_file)
+        print("Model dan scaler dimuat.")
         return model, scaler
     except FileNotFoundError:
+        print("Model atau scaler tidak ditemukan.")
         return None, None
 
-# Mengecek saldo akun sebelum melakukan trading dan menyesuaikan kuantitas
-def check_balance(symbol, quantity, action, client):
-    asset = symbol.replace("USDT", "")
-    print(f"Checking balance for {asset}...")
-    balances = client.get_asset_balance(asset=asset)
-    if balances is None:
-        raise ValueError(f"Tidak dapat mengambil saldo untuk {asset}.")
-    
-    available_balance = float(balances['free'])
-    
-    if action == 'Sell':
-        # Pastikan saldo memenuhi batas minimum lot size untuk penjualan
-        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
-        if lot_size_info is not None:
-            min_qty = float(lot_size_info['minQty'])
-            if available_balance < min_qty:
-                print(f"Saldo {asset} tidak mencukupi untuk menjual. Saldo saat ini: {available_balance} {asset}")
-                return None  # Menghindari eksekusi order jual
-        if available_balance < quantity:
-            print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
-            quantity = available_balance
-    
-    elif action == 'Buy':
-        required_balance = quantity * float(client.get_symbol_ticker(symbol=symbol)['price'])
-        if available_balance < required_balance:
-            print(f"Saldo tidak mencukupi untuk membeli {quantity} {asset}. Saldo saat ini: {available_balance} {asset}")
-            return None  # Menghindari eksekusi order beli
-    
-    return quantity
-
-# Menyesuaikan kuantitas agar sesuai dengan LOT_SIZE
-def adjust_quantity_to_lot_size(symbol, quantity, client):
-    exchange_info = client.get_symbol_info(symbol)
-    lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', exchange_info['filters']), None)
-    
-    if lot_size_info is not None:
-        min_qty = float(lot_size_info['minQty'])
-        max_qty = float(lot_size_info['maxQty'])
-        step_size = float(lot_size_info['stepSize'])
-        
-        if quantity < min_qty:
-            quantity = min_qty
-        elif quantity > max_qty:
-            quantity = max_qty
-        else:
-            quantity = (quantity // step_size) * step_size
-        
-        quantity = round(quantity, len(str(step_size).split('.')[1]))
-    
-    return quantity
-
-# Membuat keputusan trading
 def make_trade_decision(data, model, scaler):
     print("Making trade decision...")
     X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
-    X_scaled = scaler.transform(X)
-    prediction = model.predict(X_scaled[-1:])
+    if X.empty:
+        print("Tidak ada data untuk membuat keputusan perdagangan.")
+        return None
+    
+    X_last = X.iloc[-1:]
+    X_scaled = scaler.transform(X_last)
+    prediction = model.predict(X_scaled)
     
     if prediction == 1:
         action = 'Buy'
@@ -181,7 +129,46 @@ def make_trade_decision(data, model, scaler):
     print(f"Trade decision: {action}")
     return action
 
-# Eksekusi order trading
+def check_balance(symbol, quantity, action, client):
+    asset = symbol.replace("USDT", "")
+    print(f"Checking balance for {asset}...")
+    
+    balances = client.get_asset_balance(asset=asset)
+    if balances is None:
+        raise ValueError(f"Tidak dapat mengambil saldo untuk {asset}.")
+    
+    available_balance = float(balances['free'])
+    
+    if action == 'Sell':
+        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
+        if lot_size_info is not None:
+            min_qty = float(lot_size_info['minQty'])
+            if available_balance < min_qty:
+                print(f"Saldo {asset} tidak mencukupi untuk menjual. Saldo saat ini: {available_balance} {asset}")
+                return None
+        if available_balance < quantity:
+            print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
+            quantity = available_balance
+    
+    elif action == 'Buy':
+        required_balance = quantity * float(client.get_symbol_ticker(symbol=symbol)['price'])
+        if available_balance < required_balance:
+            print(f"Saldo tidak mencukupi untuk membeli {quantity} {asset}. Saldo saat ini: {available_balance} {asset}")
+            return None
+    
+    return quantity
+
+def adjust_quantity_to_lot_size(symbol, quantity, client):
+    info = client.get_symbol_info(symbol)
+    lot_size = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', info['filters']), None)
+    if lot_size:
+        min_qty = float(lot_size['minQty'])
+        step_size = float(lot_size['stepSize'])
+        quantity = (quantity // step_size) * step_size
+        if quantity < min_qty:
+            quantity = min_qty
+    return quantity
+
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
     if action == 'Buy':
@@ -220,7 +207,6 @@ def execute_trade(action, symbol, quantity, client):
     
     return order
 
-# Fungsi utama untuk menjalankan proses trading
 def main(api_key, api_secret, symbol):
     client = Client(api_key, api_secret)
     
@@ -252,7 +238,7 @@ def main(api_key, api_secret, symbol):
         time.sleep(3600)
 
 # Jalankan fungsi utama
-api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
-api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+api_key = 'YOUR_API_KEY'
+api_secret = 'YOUR_API_SECRET'
 symbol = 'DOGEUSDT'
 main(api_key, api_secret, symbol)

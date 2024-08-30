@@ -238,7 +238,7 @@ def main(api_key, api_secret, symbol):
         time.sleep(3600)
 
 # Jalankan fungsi utama
-api_key = 'YOUR_API_KEY'
-api_secret = 'YOUR_API_SECRET'
+api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
 symbol = 'DOGEUSDT'
 main(api_key, api_secret, symbol)

@@ -108,6 +108,7 @@ def load_model_and_scaler():
             scaler = pickle.load(scaler_file)
         return model, scaler
     except FileNotFoundError:
+        print("Model atau scaler tidak ditemukan.")
         return None, None
 
 # Check account balance before trading and adjust quantity
@@ -229,7 +230,6 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
             if quantity is None:
                 print("Tidak cukup saldo untuk menjual.")
                 return
-            # Proceed with the sell order
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
 
@@ -246,6 +246,7 @@ def monitor_assets(client, symbols, interval='1h', limit=1000, min_balance=100):
             data = get_market_data(symbol, client, interval, limit)
             data = add_technical_indicators(data)
             model, scaler = load_model_and_scaler()
+            
             if model is None or scaler is None:
                 print("Model atau scaler tidak ditemukan.")
                 continue

@@ -222,7 +222,7 @@ def execute_trade(action, symbol, quantity, client):
 
 # Fungsi utama untuk menjalankan trading bot
 def run_trading_bot():
-    client = Client(api_key='your_api_key', api_secret='your_api_secret')
+    client = Client(api_key='h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', api_secret='Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
     
     symbol = 'DOGEUSDT'
     quantity = 100

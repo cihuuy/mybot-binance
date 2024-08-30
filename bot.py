@@ -189,7 +189,8 @@ def make_trade_decision(data, model, scaler):
 
 # Execute trade order with stop-loss and take-profit
 def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=None):
-    print(f"Executing {action} trade...")
+    print(f"Menjalankan trade {action}...")
+    
     if action == 'Buy':
         try:
             quantity = check_balance(symbol, quantity, action, client)
@@ -197,7 +198,7 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                 print("Tidak cukup saldo USDT untuk membeli.")
                 return
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
-            print(f"Executed Buy order: {order}")
+            print(f"Order Beli berhasil: {order}")
 
             if stop_loss:
                 stop_loss_order = client.create_order(
@@ -207,7 +208,7 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                     quantity=quantity,
                     stopPrice=stop_loss
                 )
-                print(f"Stop-loss order placed: {stop_loss_order}")
+                print(f"Order Stop-loss ditempatkan: {stop_loss_order}")
 
             if take_profit:
                 take_profit_order = client.create_order(
@@ -217,44 +218,47 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                     quantity=quantity,
                     stopPrice=take_profit
                 )
-                print(f"Take-profit order placed: {take_profit_order}")
+                print(f"Order Take-profit ditempatkan: {take_profit_order}")
 
         except BinanceAPIException as e:
-            print(f"Error saat eksekusi trade: {e}")
-                
+            print(f"Kesalahan saat eksekusi trade: {e}")
+
     elif action == 'Sell':
         try:
-            # Fetch available balance
-            balance_info = client.get_asset_balance(asset=symbol.replace("USDT", ""))
+            # Ambil saldo yang tersedia
+            asset = symbol.replace("USDT", "")
+            balance_info = client.get_asset_balance(asset=asset)
             available_balance = float(balance_info['free']) if balance_info else 0.0
             
-            # Check minimum quantity
-            min_qty = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']))['minQty'])
-            step_size = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']))['stepSize'])
-            
-            print(f"Available balance: {available_balance}")
-            print(f"Min quantity: {min_qty}, Step size: {step_size}")
+            # Periksa jumlah minimum dan ukuran langkah
+            symbol_info = client.get_symbol_info(symbol)
+            min_qty = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', symbol_info['filters']))['minQty'])
+            step_size = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', symbol_info['filters']))['stepSize'])
 
-            # Adjust quantity if needed
+            print(f"Saldo tersedia: {available_balance}")
+            print(f"Jumlah minimum: {min_qty}, Ukuran langkah: {step_size}")
+
+            # Sesuaikan jumlah jika diperlukan
             if quantity < min_qty:
                 print(f"Jumlah untuk menjual ({quantity}) lebih rendah dari minimum ({min_qty}). Mengatur jumlah menjadi {min_qty}.")
                 quantity = min_qty
 
-            # Ensure quantity is in step size
+            # Pastikan jumlah sesuai dengan ukuran langkah
             quantity = round((quantity // step_size) * step_size, len(str(step_size).split('.')[1]))
 
             if available_balance < quantity:
                 print(f"Tidak cukup saldo untuk menjual {quantity} DOGE. Mengatur jumlah menjadi {available_balance}.")
                 quantity = available_balance
 
+            # Tempatkan order jual
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
-            print(f"Executed Sell order: {order}")
+            print(f"Order Jual berhasil: {order}")
 
         except BinanceAPIException as e:
-            if e.code == -1013:  # Handle insufficient funds error
-                print("Tidak cukup saldo untuk melakukan penjualan. Menunggu untuk siklus berikutnya.")
-            else:
-                print(f"Error saat eksekusi trade: {e}")
+            print(f"Kesalahan saat eksekusi trade: {e}")
+            if e.code == -1013:
+                print("Kesalahan kode -1013: Jumlah atau format order tidak valid.")
+
 
 
 # Function to evaluate model accuracy

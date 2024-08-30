@@ -111,8 +111,7 @@ def load_model_and_scaler():
 
 # Check account balance before trading and adjust quantity
 def check_balance(symbol, quantity, action, client):
-    # Use full trading pair symbol (e.g., "DOGEUSDT")
-    asset = symbol.replace("USDT", "")  # Extract asset (e.g., "DOGE" from "DOGEUSDT")
+    asset = symbol.replace("USDT", "")
     
     if action == 'Buy':
         print(f"Checking balance for USDT...")
@@ -122,11 +121,21 @@ def check_balance(symbol, quantity, action, client):
         
         available_balance = float(balances['free'])
         # Get the current price for the symbol to calculate the required balance
-        required_balance = quantity * float(client.get_symbol_ticker(symbol=symbol)['price'])
+        price = float(client.get_symbol_ticker(symbol=symbol)['price'])
+        required_balance = quantity * price
 
         if available_balance < required_balance:
             print(f"Saldo tidak mencukupi untuk membeli. Saldo saat ini: {available_balance} USDT, dibutuhkan: {required_balance} USDT")
             return None  # Skip the trade if balance is insufficient
+        
+        # Adjust quantity if it is less than the minimum purchase amount
+        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
+        if lot_size_info:
+            min_qty = float(lot_size_info['minQty'])
+            if quantity < min_qty:
+                print(f"Quantity terlalu kecil, menyesuaikan menjadi {min_qty}.")
+                quantity = min_qty
+    
     elif action == 'Sell':
         print(f"Checking balance for {asset}...")
         balances = client.get_asset_balance(asset=asset)
@@ -213,16 +222,23 @@ def evaluate_model(model, X_test, y_test):
     print(f"Backtest accuracy: {accuracy * 100:.2f}%")
     return accuracy
 
-# Main function
-def main(api_key, api_secret, symbol, interval='1h', limit=1000, trade_quantity=100):
-    print("Initializing trading bot...")
-    client = Client(api_key, api_secret)
-    data = get_market_data(symbol, client, interval, limit)
-    data = add_technical_indicators(data)
+# Main function to run trading bot
+def main(api_key, api_secret, symbol):
+    client = Client(api_key=api_key, api_secret=api_secret)
+    
+    interval = '1h'
+    limit = 1000
+    trade_quantity = 100
+    
+    # Verify server time before starting trading process
+    server_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+    print(f"Server time: {server_time}")
     
     model, scaler = load_model_and_scaler()
     if model is None or scaler is None:
         print("Training new model...")
+        data = get_market_data(symbol, client, interval, limit)
+        data = add_technical_indicators(data)
         model, scaler, X_test, y_test = train_ai_model(data)
         evaluate_model(model, X_test, y_test)
     else:

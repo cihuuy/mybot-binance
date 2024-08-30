@@ -108,7 +108,6 @@ def load_model_and_scaler():
             scaler = pickle.load(scaler_file)
         return model, scaler
     except FileNotFoundError:
-        print("Model atau scaler tidak ditemukan.")
         return None, None
 
 # Check account balance before trading and adjust quantity
@@ -139,7 +138,6 @@ def check_balance(symbol, quantity, action, client):
         
         available_balance = float(balances['free'])
         
-        # Handle cases where the quantity to sell is less than the minimum
         if available_balance < quantity:
             print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
             quantity = available_balance
@@ -230,6 +228,13 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
             if quantity is None:
                 print("Tidak cukup saldo untuk menjual.")
                 return
+            
+            # Check minimum quantity requirements
+            min_qty = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']))['minQty'])
+            if quantity < min_qty:
+                print(f"Jumlah untuk menjual ({quantity}) lebih rendah dari minimum ({min_qty}). Mengatur jumlah menjadi {min_qty}.")
+                quantity = min_qty
+            
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
 
@@ -239,45 +244,77 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
             else:
                 print(f"Error saat eksekusi trade: {e}")
 
-# Monitor selected assets
-def monitor_assets(client, symbols, interval='1h', limit=1000, min_balance=100):
+
+# Function to evaluate model accuracy
+def evaluate_model(model, X_test, y_test):
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    print(f"Backtest accuracy: {accuracy * 100:.2f}%")
+    return accuracy
+
+# Main function to run trading bot
+def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interval_days=1):
+    client = Client(api_key=api_key, api_secret=api_secret)
+    
+    # Verify server time before starting trading process
+    server_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+    print(f"Server time: {server_time}")
+    
+    model, scaler = load_model_and_scaler()
+    last_training_date = datetime.now() - timedelta(days=retrain_interval_days)
+    
+    if model is None or scaler is None or datetime.now() - last_training_date > timedelta(days=retrain_interval_days):
+        print("Training new model...")
+        data = get_market_data(symbol, client, '1h', 1000)
+        data = add_technical_indicators(data)
+        model, scaler, X_test, y_test, model_accuracy = train_ai_model(data)
+        backtest_accuracy = evaluate_model(model, X_test, y_test)
+        if model_accuracy >= 0.35 and backtest_accuracy >= 0.35:
+            print("Model trained successfully and meets accuracy requirements.")
+            last_training_date = datetime.now()  # Update the last training date
+        else:
+            print("Model accuracy or backtest accuracy is below the threshold. Skipping trading.")
+            # Print a placeholder decision
+            try:
+                data = get_market_data(symbol, client, '1h', 1000)
+                data = add_technical_indicators(data)
+                action = make_trade_decision(data, model, scaler)
+                print(f"Trade decision (skipped trading): {action}")
+            except ValueError as e:
+                print(f"An error occurred while making trade decision: {e}")
+            
+            # Continue running the bot without trading
+            while True:
+                market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+                print(f"Market time: {market_time}")
+                time.sleep(60 * 60)  # Sleep for 1 hour
+            return
+    
     while True:
-        for symbol in symbols:
-            data = get_market_data(symbol, client, interval, limit)
+        market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+        print(f"Market time: {market_time}")
+        
+        try:
+            data = get_market_data(symbol, client, '1h', 1000)
             data = add_technical_indicators(data)
-            model, scaler = load_model_and_scaler()
-            
-            if model is None or scaler is None:
-                print("Model atau scaler tidak ditemukan.")
-                continue
-            
             action = make_trade_decision(data, model, scaler)
             
-            if action == 'Buy':
-                try:
-                    price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-                    quantity = min_balance / price
-                    execute_trade(action, symbol, quantity, client, stop_loss=price*0.95, take_profit=price*1.05)
-                except BinanceAPIException as e:
-                    print(f"Error saat mendapatkan harga atau eksekusi trade: {e}")
+            # Define stop-loss and take-profit levels
+            current_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
+            stop_loss = current_price * 0.98  # Example: 2% below current price
+            take_profit = current_price * 1.02  # Example: 2% above current price
             
-            elif action == 'Sell':
-                try:
-                    quantity = check_balance(symbol, None, action, client)
-                    execute_trade(action, symbol, quantity, client)
-                except BinanceAPIException as e:
-                    print(f"Error saat mendapatkan saldo atau eksekusi trade: {e}")
+            execute_trade(action, symbol, trade_quantity, client, stop_loss, take_profit)
+        except ValueError as e:
+            print(f"An error occurred: {e}")
         
-        print(f"Waiting for the next cycle...")
-        time.sleep(75 * 60)  # Wait for 75 minutes
+        time.sleep(60 * 60)  # Sleep for 1 hour
 
-# Initialize Binance Client
-api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
-api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
-client = Client(api_key, api_secret)
-
-# Set up symbols to monitor
-symbols_to_monitor = ['DOGEUSDT']
-
-# Start monitoring
-monitor_assets(client, symbols_to_monitor)
+if __name__ == "__main__":
+    # Replace these with your actual API keys and trading symbol
+    api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+    api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+    symbol = 'DOGEUSDT'
+    trade_quantity = 100  # Adjust trade quantity as needed
+    
+    run_trading_bot(api_key, api_secret, symbol, trade_quantity)

@@ -12,19 +12,7 @@ import time
 import pickle
 from datetime import datetime
 
-# Mendapatkan waktu pasar dari Binance API
-def get_market_time(client):
-    server_time = client.get_server_time()
-    market_time = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
-    return market_time
-
-# Mendapatkan waktu server dari API Binance
-def get_server_time(client):
-    server_time = client.get_server_time()
-    server_datetime = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
-    return server_datetime
-
-# Mendapatkan data pasar dari Binance API
+# Get market data from Binance API
 def get_market_data(symbol, client, interval='1h', limit=1000):
     print(f"Downloading market data for {symbol} using Binance API...")
     
@@ -56,7 +44,7 @@ def get_market_data(symbol, client, interval='1h', limit=1000):
     
     return data
 
-# Menambahkan indikator teknikal
+# Add technical indicators to market data
 def add_technical_indicators(data):
     print("Adding technical indicators...")
     data['SMA'] = talib.SMA(data['Close'], timeperiod=20)
@@ -66,7 +54,7 @@ def add_technical_indicators(data):
     data['ATR'] = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14)
     return data
 
-# Melatih model AI dengan GridSearchCV dan TimeSeriesSplit
+# Train AI model with GridSearchCV and TimeSeriesSplit
 def train_ai_model(data):
     print("Training AI model...")
     data = data.dropna()
@@ -102,7 +90,7 @@ def train_ai_model(data):
     
     print(f"Model accuracy: {accuracy * 100:.2f}%")
     
-    # Simpan model dan scaler
+    # Save model and scaler
     with open('trading_model.pkl', 'wb') as model_file:
         pickle.dump(model, model_file)
     with open('scaler.pkl', 'wb') as scaler_file:
@@ -110,7 +98,7 @@ def train_ai_model(data):
     
     return model, scaler, X_test, y_test
 
-# Memuat model dan scaler yang disimpan
+# Load saved model and scaler
 def load_model_and_scaler():
     try:
         with open('trading_model.pkl', 'rb') as model_file:
@@ -121,9 +109,11 @@ def load_model_and_scaler():
     except FileNotFoundError:
         return None, None
 
-# Mengecek saldo akun sebelum melakukan trading dan menyesuaikan kuantitas
+# Check account balance before trading and adjust quantity
 def check_balance(symbol, quantity, action, client):
-    asset = symbol.replace("USDT", "")
+    # Use full trading pair symbol (e.g., "DOGEUSDT")
+    asset = symbol.replace("USDT", "")  # Extract asset (e.g., "DOGE" from "DOGEUSDT")
+    
     if action == 'Buy':
         print(f"Checking balance for USDT...")
         balances = client.get_asset_balance(asset='USDT')
@@ -131,11 +121,12 @@ def check_balance(symbol, quantity, action, client):
             raise ValueError("Tidak dapat mengambil saldo untuk USDT.")
         
         available_balance = float(balances['free'])
+        # Get the current price for the symbol to calculate the required balance
         required_balance = quantity * float(client.get_symbol_ticker(symbol=symbol)['price'])
 
         if available_balance < required_balance:
             print(f"Saldo tidak mencukupi untuk membeli. Saldo saat ini: {available_balance} USDT, dibutuhkan: {required_balance} USDT")
-            return None  # Menghindari eksekusi order beli jika saldo tidak mencukupi
+            return None  # Skip the trade if balance is insufficient
     elif action == 'Sell':
         print(f"Checking balance for {asset}...")
         balances = client.get_asset_balance(asset=asset)
@@ -150,7 +141,7 @@ def check_balance(symbol, quantity, action, client):
     
     return quantity
 
-# Menyesuaikan kuantitas agar sesuai dengan LOT_SIZE
+# Adjust quantity to match LOT_SIZE
 def adjust_quantity_to_lot_size(symbol, quantity, client):
     exchange_info = client.get_symbol_info(symbol)
     lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', exchange_info['filters']), None)
@@ -171,7 +162,7 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
     
     return quantity
 
-# Membuat keputusan trading
+# Make trading decision
 def make_trade_decision(data, model, scaler):
     print("Making trade decision...")
     X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
@@ -186,11 +177,11 @@ def make_trade_decision(data, model, scaler):
     print(f"Trade decision: {action}")
     return action
 
-# Eksekusi order trading
+# Execute trade order
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
     if action == 'Buy':
-        quantity = check_balance('USDT', quantity, action, client)
+        quantity = check_balance(symbol, quantity, action, client)
         if quantity is None:
             print("Tidak cukup saldo USDT untuk membeli.")
             return
@@ -204,7 +195,7 @@ def execute_trade(action, symbol, quantity, client):
     elif action == 'Sell':
         quantity = check_balance(symbol, quantity, action, client)
         if quantity is None:
-            print("Tidak cukup saldo DOGE untuk menjual.")
+            print(f"Tidak cukup saldo untuk menjual.")
             return
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
@@ -215,7 +206,7 @@ def execute_trade(action, symbol, quantity, client):
             order = None
     return order
 
-# Fungsi tambahan untuk backtesting
+# Evaluate model accuracy
 def evaluate_model(model, X_test, y_test):
     predictions = model.predict(X_test)
     accuracy = accuracy_score(y_test, predictions)
@@ -231,24 +222,30 @@ def main(api_key, api_secret, symbol, interval='1h', limit=1000, trade_quantity=
     
     model, scaler = load_model_and_scaler()
     if model is None or scaler is None:
+        print("Training new model...")
         model, scaler, X_test, y_test = train_ai_model(data)
         evaluate_model(model, X_test, y_test)
+    else:
+        print("Model and scaler loaded.")
     
     while True:
-        current_time = get_server_time(client)
-        print(f"Current server time: {current_time}")
+        market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+        print(f"Market time: {market_time}")
         
-        data = get_market_data(symbol, client, interval, limit)
-        data = add_technical_indicators(data)
-        action = make_trade_decision(data, model, scaler)
-        execute_trade(action, symbol, trade_quantity, client)
+        try:
+            data = get_market_data(symbol, client, interval, limit)
+            data = add_technical_indicators(data)
+            action = make_trade_decision(data, model, scaler)
+            execute_trade(action, symbol, trade_quantity, client)
+        except ValueError as e:
+            print(f"An error occurred: {e}")
         
-        print(f"Waiting for next interval...")
-        time.sleep(75 * 60)  # Tunggu 75 menit sebelum iterasi berikutnya
+        time.sleep(60 * 75)  # Sleep for 75 minutes
 
-# Contoh penggunaan
 if __name__ == "__main__":
-    api_key = "h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a"
-    api_secret = "Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS"
-    symbol = "DOGEUSDT"
+    # Replace these with your actual API keys and trading symbol
+    api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+    api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+    symbol = 'DOGEUSDT'
+    
     main(api_key, api_secret, symbol)

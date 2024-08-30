@@ -219,7 +219,7 @@ def evaluate_model(model, X_test, y_test):
     print(f"Backtest accuracy: {accuracy * 100:.2f}%")
     return accuracy
 
-# Main trading bot function
+# Main function to run trading bot
 def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interval_days=1):
     client = Client(api_key=api_key, api_secret=api_secret)
     
@@ -241,6 +241,11 @@ def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interva
             last_training_date = datetime.now()  # Update the last training date
         else:
             print("Model accuracy or backtest accuracy is below the threshold. Skipping trading.")
+            # Continue running the bot without trading
+            while True:
+                market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
+                print(f"Market time: {market_time}")
+                time.sleep(60 * 60)  # Sleep for 1 hour
             return
     
     while True:

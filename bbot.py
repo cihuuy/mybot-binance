@@ -186,39 +186,42 @@ def make_trade_decision(data, model, scaler):
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
     if action == 'Buy':
-        quantity = check_balance(symbol, quantity, action, client)
-        if quantity is None:
-            print("Tidak cukup saldo USDT untuk membeli.")
-            return
         try:
+            quantity = check_balance(symbol, quantity, action, client)
+            if quantity is None:
+                print("Tidak cukup saldo USDT untuk membeli.")
+                return
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
             print(f"Executed Buy order: {order}")
         except BinanceAPIException as e:
-            print(f"Error saat eksekusi trade: {e}")
-            order = None
+            if e.code == -1013:  # Handle insufficient funds error
+                print("Tidak cukup saldo untuk melakukan pembelian. Menunggu untuk siklus berikutnya.")
+            else:
+                print(f"Error saat eksekusi trade: {e}")
     elif action == 'Sell':
-        quantity = check_balance(symbol, quantity, action, client)
-        if quantity is None:
-            print(f"Tidak cukup saldo untuk menjual.")
-            return
         try:
+            quantity = check_balance(symbol, quantity, action, client)
+            if quantity is None:
+                print("Tidak cukup saldo untuk menjual.")
+                return
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
         except BinanceAPIException as e:
-            print(f"Error saat eksekusi trade: {e}")
-            order = None
-    return order
+            if e.code == -1013:  # Handle insufficient funds error
+                print("Tidak cukup saldo untuk melakukan penjualan. Menunggu untuk siklus berikutnya.")
+            else:
+                print(f"Error saat eksekusi trade: {e}")
 
-# Evaluate model accuracy
+# Function to evaluate model accuracy
 def evaluate_model(model, X_test, y_test):
     predictions = model.predict(X_test)
     accuracy = accuracy_score(y_test, predictions)
     print(f"Backtest accuracy: {accuracy * 100:.2f}%")
     return accuracy
 
-# Main function to run trading bot
+# Main trading bot function
 def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interval_days=1):
-    client = Client(api_key, api_secret)
+    client = Client(api_key=api_key, api_secret=api_secret)
     
     # Verify server time before starting trading process
     server_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)

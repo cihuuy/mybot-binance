@@ -10,7 +10,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import time
 import pickle
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Get market data from Binance API
 def get_market_data(symbol, client, interval='1h', limit=1000):
@@ -125,16 +125,12 @@ def check_balance(symbol, quantity, action, client):
         required_balance = quantity * price
 
         if available_balance < required_balance:
-            print(f"Saldo tidak mencukupi untuk membeli. Saldo saat ini: {available_balance} USDT, dibutuhkan: {required_balance} USDT")
-            return None  # Skip the trade if balance is insufficient
+            # Adjust the buy quantity to the available balance
+            quantity = available_balance / price
+            print(f"Saldo tidak mencukupi untuk membeli {quantity:.6f} {symbol}. Menyesuaikan jumlah menjadi {quantity:.6f} {symbol}.")
         
-        # Adjust quantity if it is less than the minimum purchase amount
-        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
-        if lot_size_info:
-            min_qty = float(lot_size_info['minQty'])
-            if quantity < min_qty:
-                print(f"Quantity terlalu kecil, menyesuaikan menjadi {min_qty}.")
-                quantity = min_qty
+        # Adjust quantity to match LOT_SIZE and step_size
+        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
     
     elif action == 'Sell':
         print(f"Checking balance for {asset}...")
@@ -194,7 +190,6 @@ def execute_trade(action, symbol, quantity, client):
         if quantity is None:
             print("Tidak cukup saldo USDT untuk membeli.")
             return
-        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
             print(f"Executed Buy order: {order}")
@@ -206,7 +201,6 @@ def execute_trade(action, symbol, quantity, client):
         if quantity is None:
             print(f"Tidak cukup saldo untuk menjual.")
             return
-        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
@@ -223,45 +217,43 @@ def evaluate_model(model, X_test, y_test):
     return accuracy
 
 # Main function to run trading bot
-def main(api_key, api_secret, symbol):
-    client = Client(api_key=api_key, api_secret=api_secret)
-    
-    interval = '1h'
-    limit = 1000
-    trade_quantity = 100
+def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interval_days=1):
+    client = Client(api_key, api_secret)
     
     # Verify server time before starting trading process
     server_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
     print(f"Server time: {server_time}")
     
     model, scaler = load_model_and_scaler()
-    if model is None or scaler is None:
+    last_training_date = datetime.now() - timedelta(days=retrain_interval_days)
+    
+    if model is None or scaler is None or datetime.now() - last_training_date > timedelta(days=retrain_interval_days):
         print("Training new model...")
-        data = get_market_data(symbol, client, interval, limit)
+        data = get_market_data(symbol, client, '1h', 1000)
         data = add_technical_indicators(data)
         model, scaler, X_test, y_test = train_ai_model(data)
         evaluate_model(model, X_test, y_test)
-    else:
-        print("Model and scaler loaded.")
+        last_training_date = datetime.now()  # Update the last training date
     
     while True:
         market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)
         print(f"Market time: {market_time}")
         
         try:
-            data = get_market_data(symbol, client, interval, limit)
+            data = get_market_data(symbol, client, '1h', 1000)
             data = add_technical_indicators(data)
             action = make_trade_decision(data, model, scaler)
             execute_trade(action, symbol, trade_quantity, client)
         except ValueError as e:
             print(f"An error occurred: {e}")
         
-        time.sleep(60 * 75)  # Sleep for 75 minutes
+        time.sleep(60 * 60)  # Sleep for 1 hour
 
 if __name__ == "__main__":
     # Replace these with your actual API keys and trading symbol
     api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
     api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
     symbol = 'DOGEUSDT'
+    trade_quantity = 100  # Adjust trade quantity as needed
     
-    main(api_key, api_secret, symbol)
+    run_trading_bot(api_key, api_secret, symbol, trade_quantity)

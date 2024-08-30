@@ -96,7 +96,7 @@ def train_ai_model(data):
     with open('scaler.pkl', 'wb') as scaler_file:
         pickle.dump(scaler, scaler_file)
     
-    return model, scaler, X_test, y_test
+    return model, scaler, X_test, y_test, accuracy
 
 # Load saved model and scaler
 def load_model_and_scaler():
@@ -234,9 +234,14 @@ def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interva
         print("Training new model...")
         data = get_market_data(symbol, client, '1h', 1000)
         data = add_technical_indicators(data)
-        model, scaler, X_test, y_test = train_ai_model(data)
-        evaluate_model(model, X_test, y_test)
-        last_training_date = datetime.now()  # Update the last training date
+        model, scaler, X_test, y_test, model_accuracy = train_ai_model(data)
+        backtest_accuracy = evaluate_model(model, X_test, y_test)
+        if model_accuracy >= 0.51 and backtest_accuracy >= 0.51:
+            print("Model trained successfully and meets accuracy requirements.")
+            last_training_date = datetime.now()  # Update the last training date
+        else:
+            print("Model accuracy or backtest accuracy is below the threshold. Skipping trading.")
+            return
     
     while True:
         market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)

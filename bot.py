@@ -232,33 +232,40 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
             
             # Periksa jumlah minimum dan ukuran langkah
             symbol_info = client.get_symbol_info(symbol)
-            min_qty = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', symbol_info['filters']))['minQty'])
-            step_size = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', symbol_info['filters']))['stepSize'])
+            lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', symbol_info['filters']), None)
+            min_qty = float(lot_size_info['minQty'])
+            max_qty = float(lot_size_info['maxQty'])
+            step_size = float(lot_size_info['stepSize'])
 
             print(f"Saldo tersedia: {available_balance}")
             print(f"Jumlah minimum: {min_qty}, Ukuran langkah: {step_size}")
 
             # Sesuaikan jumlah jika diperlukan
+            quantity = min(available_balance, quantity)  # Pastikan jumlah tidak melebihi saldo
             if quantity < min_qty:
-                print(f"Jumlah untuk menjual ({quantity}) lebih rendah dari minimum ({min_qty}). Mengatur jumlah menjadi {min_qty}.")
-                quantity = min_qty
-
+                quantity = min_qty  # Set ke minimum jika lebih kecil dari minQty
+            
             # Pastikan jumlah sesuai dengan ukuran langkah
-            quantity = round((quantity // step_size) * step_size, len(str(step_size).split('.')[1]))
+            quantity = (quantity // step_size) * step_size
+            quantity = round(quantity, len(str(step_size).split('.')[1]))  # Pembulatan sesuai step_size
 
-            if available_balance < quantity:
-                print(f"Tidak cukup saldo untuk menjual {quantity} DOGE. Mengatur jumlah menjadi {available_balance}.")
+            # Pastikan tidak melebihi saldo yang tersedia
+            if quantity > available_balance:
                 quantity = available_balance
 
-            # Tempatkan order jual
-            order = client.order_market_sell(symbol=symbol, quantity=quantity)
-            print(f"Order Jual berhasil: {order}")
+            print(f"Jumlah yang akan dijual setelah disesuaikan: {quantity} DOGE")
+
+            if quantity >= min_qty:
+                # Tempatkan order jual
+                order = client.order_market_sell(symbol=symbol, quantity=quantity)
+                print(f"Order Jual berhasil: {order}")
+            else:
+                print(f"Jumlah yang disesuaikan {quantity} masih kurang dari minimum {min_qty}, tidak dapat melakukan penjualan.")
 
         except BinanceAPIException as e:
             print(f"Kesalahan saat eksekusi trade: {e}")
             if e.code == -1013:
                 print("Kesalahan kode -1013: Jumlah atau format order tidak valid.")
-
 
 
 # Function to evaluate model accuracy

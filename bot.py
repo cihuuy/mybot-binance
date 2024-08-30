@@ -224,17 +224,29 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                 
     elif action == 'Sell':
         try:
-            quantity = check_balance(symbol, quantity, action, client)
-            if quantity is None:
-                print("Tidak cukup saldo untuk menjual.")
-                return
+            # Fetch available balance
+            balance_info = client.get_asset_balance(asset=symbol.replace("USDT", ""))
+            available_balance = float(balance_info['free']) if balance_info else 0.0
             
-            # Check minimum quantity requirements
+            # Check minimum quantity
             min_qty = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']))['minQty'])
+            step_size = float(next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']))['stepSize'])
+            
+            print(f"Available balance: {available_balance}")
+            print(f"Min quantity: {min_qty}, Step size: {step_size}")
+
+            # Adjust quantity if needed
             if quantity < min_qty:
                 print(f"Jumlah untuk menjual ({quantity}) lebih rendah dari minimum ({min_qty}). Mengatur jumlah menjadi {min_qty}.")
                 quantity = min_qty
-            
+
+            # Ensure quantity is in step size
+            quantity = round((quantity // step_size) * step_size, len(str(step_size).split('.')[1]))
+
+            if available_balance < quantity:
+                print(f"Tidak cukup saldo untuk menjual {quantity} DOGE. Mengatur jumlah menjadi {available_balance}.")
+                quantity = available_balance
+
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
 

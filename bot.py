@@ -218,12 +218,9 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                     stopPrice=take_profit
                 )
                 print(f"Take-profit order placed: {take_profit_order}")
-                
+
         except BinanceAPIException as e:
-            if e.code == -1013:  # Handle insufficient funds error
-                print("Tidak cukup saldo untuk melakukan pembelian. Menunggu untuk siklus berikutnya.")
-            else:
-                print(f"Error saat eksekusi trade: {e}")
+            print(f"Error saat eksekusi trade: {e}")
                 
     elif action == 'Sell':
         try:
@@ -233,7 +230,7 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                 return
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Executed Sell order: {order}")
-            
+
         except BinanceAPIException as e:
             if e.code == -1013:  # Handle insufficient funds error
                 print("Tidak cukup saldo untuk melakukan penjualan. Menunggu untuk siklus berikutnya.")
@@ -269,6 +266,15 @@ def run_trading_bot(api_key, api_secret, symbol, trade_quantity, retrain_interva
             last_training_date = datetime.now()  # Update the last training date
         else:
             print("Model accuracy or backtest accuracy is below the threshold. Skipping trading.")
+            # Print a placeholder decision
+            try:
+                data = get_market_data(symbol, client, '1h', 1000)
+                data = add_technical_indicators(data)
+                action = make_trade_decision(data, model, scaler)
+                print(f"Trade decision (skipped trading): {action}")
+            except ValueError as e:
+                print(f"An error occurred while making trade decision: {e}")
+            
             # Continue running the bot without trading
             while True:
                 market_time = datetime.fromtimestamp(client.get_server_time()['serverTime'] / 1000.0)

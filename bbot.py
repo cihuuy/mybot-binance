@@ -1,10 +1,11 @@
 import yfinance as yf
 import talib
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 import time
@@ -23,13 +24,36 @@ def get_server_time(client):
     server_datetime = datetime.fromtimestamp(server_time['serverTime'] / 1000.0)
     return server_datetime
 
-# Mendapatkan data pasar dari yfinance
-def get_market_data(symbol, period='1y', interval='1h'):
-    print(f"Downloading market data for {symbol}...")
-    data = yf.download(symbol, period=period, interval=interval)
-    if data.empty:
+# Mendapatkan data pasar dari Binance API
+def get_market_data(symbol, client, interval='1h', limit=1000):
+    print(f"Downloading market data for {symbol} using Binance API...")
+    
+    klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+    
+    if not klines:
         raise ValueError(f"Data untuk simbol {symbol} tidak ditemukan atau kosong.")
+    
+    data = {
+        'Open': [],
+        'High': [],
+        'Low': [],
+        'Close': [],
+        'Volume': [],
+        'Date': []
+    }
+    
+    for kline in klines:
+        data['Date'].append(datetime.fromtimestamp(kline[0] / 1000.0))
+        data['Open'].append(float(kline[1]))
+        data['High'].append(float(kline[2]))
+        data['Low'].append(float(kline[3]))
+        data['Close'].append(float(kline[4]))
+        data['Volume'].append(float(kline[5]))
+    
+    data = pd.DataFrame(data)
+    data.set_index('Date', inplace=True)
     print(f"Data downloaded: {data.head()}")
+    
     return data
 
 # Menambahkan indikator teknikal
@@ -67,7 +91,6 @@ def train_ai_model(data):
         'max_depth': [3, 5, 7]
     }
     
-    # Menggunakan TimeSeriesSplit untuk menjaga urutan waktu
     tscv = TimeSeriesSplit(n_splits=5)
     grid_search = GridSearchCV(GradientBoostingClassifier(), param_grid, cv=tscv, scoring='accuracy')
     grid_search.fit(X_train, y_train)
@@ -98,65 +121,32 @@ def load_model_and_scaler():
     except FileNotFoundError:
         return None, None
 
-# Fungsi tambahan untuk backtesting
-def backtest(model, scaler, data, start_date, end_date):
-    print("Starting backtest...")
-    data = data.loc[start_date:end_date]
-    data = add_technical_indicators(data)
-    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
-    X_scaled = scaler.transform(X)
-    
-    data['Prediction'] = model.predict(X_scaled)
-    data['Strategy_Return'] = data['Prediction'].shift(1) * (data['Close'].pct_change())
-    data['Market_Return'] = data['Close'].pct_change()
-    
-    strategy_return = data['Strategy_Return'].cumsum()[-1]
-    market_return = data['Market_Return'].cumsum()[-1]
-    
-    print(f"Backtest completed: Strategy return: {strategy_return * 100:.2f}%, Market return: {market_return * 100:.2f}%")
-    return strategy_return, market_return
-
-# Fungsi tambahan untuk menghitung berbagai metrik evaluasi
-def evaluate_model(model, X_test, y_test):
-    print("Evaluating model...")
-    predictions = model.predict(X_test)
-    
-    accuracy = accuracy_score(y_test, predictions)
-    precision = precision_score(y_test, predictions)
-    recall = recall_score(y_test, predictions)
-    f1 = f1_score(y_test, predictions)
-    
-    print(f"Accuracy: {accuracy * 100:.2f}%")
-    print(f"Precision: {precision * 100:.2f}%")
-    print(f"Recall: {recall * 100:.2f}%")
-    print(f"F1 Score: {f1 * 100:.2f}%")
-    
-    return accuracy, precision, recall, f1
-
 # Mengecek saldo akun sebelum melakukan trading dan menyesuaikan kuantitas
 def check_balance(symbol, quantity, action, client):
     asset = symbol.replace("USDT", "")
-    print(f"Checking balance for {asset}...")
-    balances = client.get_asset_balance(asset=asset)
-    if balances is None:
-        raise ValueError(f"Tidak dapat mengambil saldo untuk {asset}.")
-    
-    available_balance = float(balances['free'])
-    
-    if action == 'Sell':
-        lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', client.get_symbol_info(symbol)['filters']), None)
-        if lot_size_info is not None:
-            min_qty = float(lot_size_info['minQty'])
-            if available_balance < min_qty:
-                print(f"Saldo DOGE tidak mencukupi untuk menjual. Saldo saat ini: {available_balance} DOGE")
-                return None
+    if action == 'Buy':
+        print(f"Checking balance for USDT...")
+        balances = client.get_asset_balance(asset='USDT')
+        if balances is None:
+            raise ValueError("Tidak dapat mengambil saldo untuk USDT.")
+        
+        available_balance = float(balances['free'])
+        required_balance = quantity * float(client.get_symbol_ticker(symbol=symbol)['price'])
+
+        if available_balance < required_balance:
+            print(f"Saldo tidak mencukupi untuk membeli. Saldo saat ini: {available_balance} USDT, dibutuhkan: {required_balance} USDT")
+            return None  # Menghindari eksekusi order beli jika saldo tidak mencukupi
+    elif action == 'Sell':
+        print(f"Checking balance for {asset}...")
+        balances = client.get_asset_balance(asset=asset)
+        if balances is None:
+            raise ValueError(f"Tidak dapat mengambil saldo untuk {asset}.")
+        
+        available_balance = float(balances['free'])
+        
         if available_balance < quantity:
             print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
             quantity = available_balance
-    
-    elif action == 'Buy':
-        if available_balance < quantity:
-            raise ValueError(f"Saldo tidak mencukupi untuk membeli {quantity} {asset}. Saldo saat ini: {available_balance} {asset}")
     
     return quantity
 
@@ -200,56 +190,65 @@ def make_trade_decision(data, model, scaler):
 def execute_trade(action, symbol, quantity, client):
     print(f"Executing {action} trade...")
     if action == 'Buy':
-        quantity = check_balance(symbol, quantity, action, client)
+        quantity = check_balance('USDT', quantity, action, client)
         if quantity is None:
+            print("Tidak cukup saldo USDT untuk membeli.")
             return
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
-            print(f"Buy order executed: {order}")
+            print(f"Executed Buy order: {order}")
         except BinanceAPIException as e:
-            print(f"An error occurred: {e}")
+            print(f"Error saat eksekusi trade: {e}")
+            order = None
     elif action == 'Sell':
         quantity = check_balance(symbol, quantity, action, client)
         if quantity is None:
+            print("Tidak cukup saldo DOGE untuk menjual.")
             return
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         try:
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
-            print(f"Sell order executed: {order}")
+            print(f"Executed Sell order: {order}")
         except BinanceAPIException as e:
-            print(f"An error occurred: {e}")
+            print(f"Error saat eksekusi trade: {e}")
+            order = None
+    return order
 
-# Fungsi utama untuk menjalankan trading bot
-def run_trading_bot():
-    client = Client(api_key='h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', api_secret='Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
-    
-    symbol = 'DOGEUSDT'
-    quantity = 100
+# Fungsi tambahan untuk backtesting
+def evaluate_model(model, X_test, y_test):
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    print(f"Backtest accuracy: {accuracy * 100:.2f}%")
+    return accuracy
+
+# Main function
+def main(api_key, api_secret, symbol, interval='1h', limit=1000, trade_quantity=100):
+    print("Initializing trading bot...")
+    client = Client(api_key, api_secret)
+    data = get_market_data(symbol, client, interval, limit)
+    data = add_technical_indicators(data)
     
     model, scaler = load_model_and_scaler()
-    
     if model is None or scaler is None:
-        data = get_market_data(symbol)
-        data = add_technical_indicators(data)
         model, scaler, X_test, y_test = train_ai_model(data)
         evaluate_model(model, X_test, y_test)
-    else:
-        print("Model and scaler loaded.")
     
     while True:
-        market_time = get_market_time(client)
-        print(f"Market time: {market_time}")
+        current_time = get_server_time(client)
+        print(f"Current server time: {current_time}")
         
-        try:
-            data = get_market_data(symbol, period='7d', interval='75m')
-            data = add_technical_indicators(data)
-            action = make_trade_decision(data, model, scaler)
-            execute_trade(action, symbol, quantity, client)
-        except ValueError as e:
-            print(f"An error occurred: {e}")
+        data = get_market_data(symbol, client, interval, limit)
+        data = add_technical_indicators(data)
+        action = make_trade_decision(data, model, scaler)
+        execute_trade(action, symbol, trade_quantity, client)
         
-        time.sleep(75 * 60)  # 75 menit
+        print(f"Waiting for next interval...")
+        time.sleep(75 * 60)  # Tunggu 75 menit sebelum iterasi berikutnya
 
+# Contoh penggunaan
 if __name__ == "__main__":
-    run_trading_bot()
+    api_key = "h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a"
+    api_secret = "Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS"
+    symbol = "DOGEUSDT"
+    main(api_key, api_secret, symbol)

@@ -4,7 +4,6 @@ from hmmlearn import hmm
 from sklearn.preprocessing import StandardScaler
 from binance.client import Client
 import time
-import matplotlib.pyplot as plt
 
 # Fungsi untuk mengambil data harga dari Binance
 def get_data(symbol, interval='1h', limit=1000, client=None):
@@ -60,9 +59,12 @@ def make_decision(hidden_states, state_probs, data):
         elif max_prob_state == 1:
             action = 'Sell'
     
-    print(f"Latest State Probabilities: {dict(zip(state_labels, latest_state_probs))}")
+    # Tampilkan persentase probabilitas
+    state_probs_summary = dict(zip(state_labels, latest_state_probs))
+    print(f"Latest State Probabilities: {state_probs_summary}")
     print(f"Trade decision: {action}")
-    return action
+    
+    return action, state_probs_summary
 
 # Fungsi untuk menyesuaikan jumlah agar sesuai dengan LOT_SIZE
 def adjust_quantity_to_lot_size(symbol, quantity, client):
@@ -123,7 +125,7 @@ def main():
             hidden_states, state_probs = predict(model, scaler, new_data[['Close']])
             
             # Ambil keputusan trading
-            action = make_decision(hidden_states, state_probs, new_data)
+            action, state_probs_summary = make_decision(hidden_states, state_probs, new_data)
             
             # Tentukan jumlah untuk trading (contoh jumlah)
             quantity = 1.0

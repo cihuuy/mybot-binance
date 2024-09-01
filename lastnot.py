@@ -1,3 +1,4 @@
+import yfinance as yf
 import talib
 import numpy as np
 import pandas as pd
@@ -52,15 +53,33 @@ def train_ai_model(data):
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
+    # Define parameter distributions
     param_distributions = {
-        'n_estimators': [100, 200, 500],
+        'n_estimators': [100, 200, 500, 1000],
         'max_depth': [3, 5, 7, 9],
-        'learning_rate': [0.01, 0.1, 0.2]
+        'learning_rate': [0.01, 0.05, 0.1, 0.2],
+        'subsample': [0.8, 0.9, 1.0],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4]
     }
 
-    tscv = TimeSeriesSplit(n_splits=5)
-    random_search = RandomizedSearchCV(GradientBoostingClassifier(), param_distributions, n_iter=10, cv=tscv, scoring='accuracy', random_state=42)
+    # Create RandomizedSearchCV object
+    random_search = RandomizedSearchCV(
+        GradientBoostingClassifier(),
+        param_distributions=param_distributions,
+        n_iter=100,  # Jumlah kombinasi parameter yang akan diuji
+        cv=TimeSeriesSplit(n_splits=5),
+        scoring='accuracy',
+        verbose=2,
+        random_state=42
+    )
+
+    # Fit the random search object to the data
     random_search.fit(X_train, y_train)
+
+    # Print the best parameters and score
+    print("Best parameters found: ", random_search.best_params_)
+    print("Best score: ", random_search.best_score_)
 
     model = random_search.best_estimator_
     model_accuracy = accuracy_score(y_test, model.predict(X_test))
@@ -136,6 +155,7 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
             quantity = max_qty
         else:
             quantity = (quantity // step_size) * step_size
+        # Round quantity to the appropriate number of decimal places
         quantity = round(quantity, len(str(step_size).split('.')[1]))
     return quantity
 
@@ -165,19 +185,17 @@ def make_trade_decision(data, model, scaler):
 
 # Execute trade order
 def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=None):
-    print(f"Menjalankan trade {action}...")
+    # Adjust quantity to meet Binance's LOT_SIZE requirement
+    quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+    
+    print(f"Executing {action} trade for {symbol} with quantity {quantity:.6f}")
     try:
-        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
         if action == 'Buy':
-            quantity = check_balance(symbol, quantity, action, client)
-            if quantity is None:
-                print("Tidak cukup saldo USDT untuk membeli.")
-                return
             order = client.order_market_buy(symbol=symbol, quantity=quantity)
             print(f"Buy order placed: {order}")
             if stop_loss is not None and take_profit is not None:
-                stop_price = round(stop_loss, 6)
-                limit_price = round(take_profit, 6)
+                limit_price = (stop_loss + take_profit) / 2  # Example limit price
+                stop_price = stop_loss
                 client.create_oco_order(symbol=symbol, side='SELL', quantity=quantity, price=limit_price, stopPrice=stop_price, stopLimitPrice=stop_price, stopLimitTimeInForce='GTC')
                 print(f"OCO order placed with Stop-Loss at {stop_loss:.6f} and Take-Profit at {take_profit:.6f}")
         elif action == 'Sell':
@@ -194,41 +212,25 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
     except Exception as e:
         print(f"Error executing trade: {e}")
 
-# Main trading loop
-def trading_bot(symbol, client):
-    print(f"Starting trading bot for {symbol}...")
-    while True:
-        try:
-            market_data = get_market_data(symbol, client)
-            market_data = add_technical_indicators(market_data)
-            model, scaler = load_model_and_scaler()
-            if model is None or scaler is None:
-                print("Model tidak ditemukan, melakukan training model...")
-                model, scaler, model_accuracy = train_ai_model(market_data)
-            else:
-                model_accuracy = None
-            
-            # Backtest accuracy on the latest data before making a decision
-            backtest_accuracy = backtest_model(market_data, model, scaler)
-            
-            action, stop_loss, take_profit = make_trade_decision(market_data, model, scaler)
-            balance_info = client.get_asset_balance(asset='USDT')
-            usdt_balance = float(balance_info['free'])
-            quantity = (usdt_balance * 0.1) / market_data['Close'].iloc[-1]
-            
-            execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
-            
-            if model_accuracy is not None:
-                print(f"Model accuracy: {model_accuracy * 100:.2f}%")
-            print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
-            
-            time.sleep(60 * 15)  # Wait for 15 minutes before next trade
-        except Exception as e:
-            print(f"Error in trading loop: {e}")
-            time.sleep(60)  # Wait for 1 minute before retrying
+def main():
+    api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+    api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+    client = Client(api_key, api_secret)
 
-# Instantiate Binance client
-client = Client(api_key='h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', api_secret='Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
+    symbol = 'DOGEUSDT'
+    data = get_market_data(symbol, client)
+    data = add_technical_indicators(data)
 
-# Run trading bot for DOGEUSDT
-trading_bot('DOGEUSDT', client)
+    model, scaler = load_model_and_scaler()
+    if model is None or scaler is None:
+        model, scaler, _ = train_ai_model(data)
+
+    backtest_accuracy = backtest_model(data, model, scaler)
+    
+    action, stop_loss, take_profit = make_trade_decision(data, model, scaler)
+    available_balance = client.get_asset_balance(asset='USDT')['free']
+    quantity = float(available_balance) / float(client.get_symbol_ticker(symbol=symbol)['price'])
+    execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
+
+if __name__ == "__main__":
+    main()

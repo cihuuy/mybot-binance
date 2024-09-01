@@ -1,4 +1,3 @@
-import yfinance as yf
 import talib
 import numpy as np
 import pandas as pd
@@ -14,7 +13,7 @@ from datetime import datetime
 from scipy.stats import norm
 
 # Get market data from Binance API
-def get_market_data(symbol, client, interval='1h', limit=1000):
+def get_market_data(symbol, client, interval='15m', limit=1000):
     print(f"Downloading market data for {symbol} using Binance API...")
     klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
     if not klines:
@@ -64,8 +63,8 @@ def train_ai_model(data):
     random_search.fit(X_train, y_train)
 
     model = random_search.best_estimator_
-    accuracy = accuracy_score(y_test, model.predict(X_test))
-    print(f"Model accuracy: {accuracy * 100:.2f}%")
+    model_accuracy = accuracy_score(y_test, model.predict(X_test))
+    print(f"Model accuracy: {model_accuracy * 100:.2f}%")
 
     # Save model and scaler
     with open('trading_model.pkl', 'wb') as model_file:
@@ -73,7 +72,20 @@ def train_ai_model(data):
     with open('scaler.pkl', 'wb') as scaler_file:
         pickle.dump(scaler, scaler_file)
 
-    return model, scaler
+    return model, scaler, model_accuracy
+
+# Backtest the model
+def backtest_model(data, model, scaler):
+    print("Backtesting model...")
+    data = data.dropna()
+    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']]
+    y = (data['Close'].shift(-1) > data['Close']).astype(int)
+    
+    X_scaled = scaler.transform(X)
+    y_pred = model.predict(X_scaled)
+    backtest_accuracy = accuracy_score(y, y_pred)
+    print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
+    return backtest_accuracy
 
 # Load saved model and scaler
 def load_model_and_scaler():
@@ -166,27 +178,21 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
             if stop_loss is not None and take_profit is not None:
                 stop_price = round(stop_loss, 6)
                 limit_price = round(take_profit, 6)
-                stop_loss_order = client.create_oco_order(
-                    symbol=symbol,
-                    side=Client.SIDE_SELL,
-                    quantity=quantity,
-                    stopPrice=stop_price,
-                    stopLimitPrice=stop_price * 0.999,  # Adjust for taker fee
-                    stopLimitTimeInForce='GTC',
-                    price=limit_price
-                )
-                print(f"OCO order placed: {stop_loss_order}")
+                client.create_oco_order(symbol=symbol, side='SELL', quantity=quantity, price=limit_price, stopPrice=stop_price, stopLimitPrice=stop_price, stopLimitTimeInForce='GTC')
+                print(f"OCO order placed with Stop-Loss at {stop_loss:.6f} and Take-Profit at {take_profit:.6f}")
         elif action == 'Sell':
             quantity = check_balance(symbol, quantity, action, client)
             if quantity is None:
-                print("Tidak cukup saldo untuk menjual.")
+                print(f"Tidak cukup saldo {symbol.replace('USDT', '')} untuk menjual.")
                 return
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Sell order placed: {order}")
+        else:
+            print(f"Unknown action {action}. Skipping trade.")
     except BinanceAPIException as e:
-        print(f"Binance API error: {e.message}")
+        print(f"Binance API Exception: {e}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error executing trade: {e}")
 
 # Main trading loop
 def trading_bot(symbol, client):
@@ -198,13 +204,25 @@ def trading_bot(symbol, client):
             model, scaler = load_model_and_scaler()
             if model is None or scaler is None:
                 print("Model tidak ditemukan, melakukan training model...")
-                model, scaler = train_ai_model(market_data)
+                model, scaler, model_accuracy = train_ai_model(market_data)
+            else:
+                model_accuracy = None
+            
+            # Backtest accuracy on the latest data before making a decision
+            backtest_accuracy = backtest_model(market_data, model, scaler)
+            
             action, stop_loss, take_profit = make_trade_decision(market_data, model, scaler)
             balance_info = client.get_asset_balance(asset='USDT')
             usdt_balance = float(balance_info['free'])
             quantity = (usdt_balance * 0.1) / market_data['Close'].iloc[-1]
+            
             execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
-            time.sleep(60 * 60)  # Wait for 1 hour before next trade
+            
+            if model_accuracy is not None:
+                print(f"Model accuracy: {model_accuracy * 100:.2f}%")
+            print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
+            
+            time.sleep(60 * 15)  # Wait for 15 minutes before next trade
         except Exception as e:
             print(f"Error in trading loop: {e}")
             time.sleep(60)  # Wait for 1 minute before retrying

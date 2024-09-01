@@ -1,15 +1,16 @@
 #requirements
 ##install def ta-lib :
-sudo apt-get update
-sudo apt-get install -y build-essential wget
-wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xvzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
-./configure --prefix=/usr
-make
-sudo make install
+1. wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+2. tar -xzf ta-lib-0.4.0-src.tar.gz
+3. cd ta-lib
+4. ./configure --prefix=/usr
+5. make
+6. sudo make install
+7.  pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance
+8.  
+
 ##instal def python
-  pip install yfinance ta-lib scikit-learn binance
+ 
 #process and fitur
 1. Mengumpulkan Data Pasar: Data pasar untuk simbol tertentu (misalnya, BTC-USD) dikumpulkan menggunakan yfinance. Data ini mencakup harga historis dalam interval tertentu (misalnya, 1 jam selama 1 bulan).
 

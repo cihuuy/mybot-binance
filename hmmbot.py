@@ -1,22 +1,21 @@
-import yfinance as yf
-import talib
-import numpy as np
 import pandas as pd
+import numpy as np
+import talib
+import pickle
+import time
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
+from hmmlearn import hmm
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-import time
-import pickle
 from datetime import datetime
 from scipy.stats import norm
-from hmmlearn import hmm
 
-# Function to get market data from Binance API
-def get_market_data(symbol, client, interval='1h', limit=1000):
-    print(f"Downloading market data for {symbol}...")
+# Get market data from Binance API
+def get_market_data(symbol, client, interval='15m', limit=1000):
+    print(f"Downloading market data for {symbol} using Binance API...")
     klines = client.get_klines(symbol=symbol, interval=interval, limit=limit)
     if not klines:
         raise ValueError(f"Data untuk simbol {symbol} tidak ditemukan atau kosong.")
@@ -29,10 +28,10 @@ def get_market_data(symbol, client, interval='1h', limit=1000):
         'Volume': [float(k[5]) for k in klines]
     }
     df = pd.DataFrame(data).set_index('Date')
-    print(f"Data downloaded: {df.tail()}")
+    print(f"Data downloaded: {df.head()}")
     return df
 
-# Function to add technical indicators to market data
+# Add technical indicators to market data
 def add_technical_indicators(data):
     print("Adding technical indicators...")
     data['SMA'] = talib.SMA(data['Close'], timeperiod=20)
@@ -42,9 +41,9 @@ def add_technical_indicators(data):
     data['ATR'] = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14)
     return data
 
-# Function to train Gradient Boosting model with RandomizedSearchCV and TimeSeriesSplit
-def train_gradient_boosting_model(data):
-    print("Training Gradient Boosting model...")
+# Train AI model with RandomizedSearchCV and TimeSeriesSplit
+def train_ai_model(data):
+    print("Training AI model...")
     data = data.dropna()
     X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']]
     y = (data['Close'].shift(-1) > data['Close']).astype(int)
@@ -81,6 +80,7 @@ def train_gradient_boosting_model(data):
     print("Best parameters found: ", random_search.best_params_)
     print("Best score: ", random_search.best_score_)
 
+    # Save model and scaler
     with open('gradient_boosting_model.pkl', 'wb') as model_file:
         pickle.dump(best_model, model_file)
     with open('gradient_boosting_scaler.pkl', 'wb') as scaler_file:
@@ -88,68 +88,90 @@ def train_gradient_boosting_model(data):
 
     return best_model, scaler, model_accuracy
 
-# Function to train HMM model
+# Backtest the model
+def backtest_model(data, model, scaler):
+    print("Backtesting model...")
+    data = data.dropna()
+    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']]
+    y = (data['Close'].shift(-1) > data['Close']).astype(int)
+    
+    X_scaled = scaler.transform(X)
+    y_pred = model.predict(X_scaled)
+    backtest_accuracy = accuracy_score(y, y_pred)
+    print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
+    return backtest_accuracy
+
+# Load saved model and scaler
+def load_model_and_scaler():
+    try:
+        with open('gradient_boosting_model.pkl', 'rb') as model_file:
+            model = pickle.load(model_file)
+        with open('gradient_boosting_scaler.pkl', 'rb') as scaler_file:
+            scaler = pickle.load(scaler_file)
+        return model, scaler
+    except FileNotFoundError:
+        print("Model or scaler file not found. Training a new model.")
+        return None, None
+
+# Train HMM model
 def train_hmm(data, n_components):
     print("Training HMM model...")
     scaler = StandardScaler()
     data_scaled = scaler.fit_transform(data)
-
+    
     model = hmm.GaussianHMM(n_components=n_components)
     model.fit(data_scaled)
     return model, scaler
 
-# Function to predict using HMM
+# Predict with HMM model
 def predict_hmm(model, scaler, data):
-    print("Predicting hidden states...")
+    print("Predicting hidden states with HMM...")
     data_scaled = scaler.transform(data)
     hidden_states = model.predict(data_scaled)
+    
+    # Probabilities of hidden states
     state_probs = model.predict_proba(data_scaled)
     return hidden_states, state_probs
 
-# Function to make decision based on HMM
-def make_decision_hmm(hidden_states, state_probs, data):
-    latest_state_probs = state_probs[-1]
-    state_labels = ['State 0', 'State 1', 'State 2']  # Adjust according to n_components
-    max_prob_state = np.argmax(latest_state_probs)
-    action = 'Hold'
+# Make trading decision
+def make_trade_decision(data, model, scaler, use_hmm=False):
+    if use_hmm:
+        # HMM decision
+        hidden_states, state_probs = predict_hmm(model, scaler, data[['Close']])
+        latest_state_probs = state_probs[-1]
+        
+        state_labels = ['State 0', 'State 1', 'State 2']
+        max_prob_state = np.argmax(latest_state_probs)
+        action = 'Hold'
+        
+        if latest_state_probs[max_prob_state] > 0.6:
+            if max_prob_state == 0:
+                action = 'Buy'
+            elif max_prob_state == 1:
+                action = 'Sell'
+        
+        state_probs_summary = dict(zip(state_labels, latest_state_probs))
+        print(f"Latest State Probabilities: {state_probs_summary}")
+        print(f"Trade decision (HMM): {action}")
+        return action, state_probs_summary
     
-    if latest_state_probs[max_prob_state] > 0.6:
-        if max_prob_state == 0:
-            action = 'Buy'
-        elif max_prob_state == 1:
-            action = 'Sell'
-    
-    state_probs_summary = dict(zip(state_labels, latest_state_probs))
-    print(f"Latest State Probabilities: {state_probs_summary}")
-    print(f"Trade decision: {action}")
-    
-    return action, state_probs_summary
+    else:
+        # AI decision
+        X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
+        X_scaled = scaler.transform(X)
+        prediction = model.predict(X_scaled[-1:])
+        stop_loss_pct = model.predict_proba(X_scaled[-1:])[0][1] * 0.02  # Example multiplier for risk adjustment
+        take_profit_pct = model.predict_proba(X_scaled[-1:])[0][0] * 0.02  # Example multiplier for reward adjustment
+        current_price = data['Close'].iloc[-1]
+        stop_loss = current_price * (1 - stop_loss_pct)
+        take_profit = current_price * (1 + take_profit_pct)
+        action = 'Buy' if prediction == 1 else 'Sell'
+        print(f"Trade decision (AI): {action}")
+        print(f"Calculated Stop-Loss: {stop_loss:.6f}")
+        print(f"Calculated Take-Profit: {take_profit:.6f}")
+        return action, stop_loss, take_profit
 
-# Function to check balance and adjust quantity
-def check_balance(symbol, quantity, action, client):
-    asset = symbol.replace("USDT", "")
-    if action == 'Buy':
-        print(f"Checking balance for USDT...")
-        balances = client.get_asset_balance(asset='USDT')
-        available_balance = float(balances['free'])
-        price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-        required_balance = quantity * price
-
-        if available_balance < required_balance:
-            quantity = available_balance / price
-            print(f"Saldo tidak mencukupi untuk membeli {quantity:.6f} {symbol}. Menyesuaikan jumlah menjadi {quantity:.6f} {symbol}.")
-        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
-    elif action == 'Sell':
-        print(f"Checking balance for {asset}...")
-        balances = client.get_asset_balance(asset=asset)
-        available_balance = float(balances['free'])
-
-        if available_balance < quantity:
-            print(f"Saldo tidak mencukupi untuk menjual {quantity} {asset}. Menyesuaikan jumlah menjadi {available_balance} {asset}.")
-            quantity = available_balance
-    return quantity
-
-# Function to adjust quantity to match LOT_SIZE
+# Adjust quantity to match LOT_SIZE
 def adjust_quantity_to_lot_size(symbol, quantity, client):
     exchange_info = client.get_symbol_info(symbol)
     lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', exchange_info['filters']), None)
@@ -163,87 +185,50 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
             quantity = max_qty
         else:
             quantity = (quantity // step_size) * step_size
-        quantity = round(quantity, len(str(step_size).split('.')[1]))
+        quantity = round(quantity, len(str(step_size).split('.')[1]))  # Match precision of step size
     return quantity
 
-# Function to execute trade order
-def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=None):
-    quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
-    print(f"Executing {action} trade for {symbol} with quantity {quantity:.6f}")
+# Place a market order
+def place_market_order(symbol, side, quantity, client):
     try:
-        if action == 'Buy':
-            order = client.order_market_buy(symbol=symbol, quantity=quantity)
-            print(f"Buy order placed: {order}")
-            if stop_loss is not None and take_profit is not None:
-                limit_price = (stop_loss + take_profit) / 2
-                stop_price = stop_loss
-                client.create_oco_order(symbol=symbol, side='SELL', quantity=quantity, price=limit_price, stopPrice=stop_price, stopLimitPrice=stop_price, stopLimitTimeInForce='GTC')
-                print(f"OCO order placed with Stop-Loss at {stop_loss:.6f} and Take-Profit at {take_profit:.6f}")
-        elif action == 'Sell':
-            available_balance = client.get_asset_balance(asset=symbol.replace("USDT", ""))
-            if available_balance is None:
-                print(f"Tidak ditemukan saldo untuk {symbol.replace('USDT', '')}.")
-                return
-            available_quantity = float(available_balance['free'])
-            if quantity > available_quantity:
-                quantity = available_quantity
-            order = client.order_market_sell(symbol=symbol, quantity=quantity)
-            print(f"Sell order placed: {order}")
+        adjusted_quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+        print(f"Placing {side} market order for {symbol} with quantity {adjusted_quantity:.6f}...")
+        order = client.order_market(
+            symbol=symbol,
+            side=side,
+            quantity=adjusted_quantity
+        )
+        print("Order placed successfully.")
+        return order
     except BinanceAPIException as e:
-        print(f"Error executing trade: {e.message}")
+        print(f"Binance API exception occurred: {e}")
+        return None
 
-# Main trading function
-def trade(symbol, client, model_gb, scaler_gb, model_hmm, scaler_hmm, n_components, quantity=10):
+# Execute trading strategy
+def execute_trading_strategy():
+    client = Client(api_key='h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', api_secret='Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
+    symbol = 'DOGEUSDT'
     df = get_market_data(symbol, client)
     df = add_technical_indicators(df)
+    
+    # Load model and scaler
+    model, scaler = load_model_and_scaler()
+    if model is None or scaler is None:
+        model, scaler, _ = train_ai_model(df)
+    
+    action, stop_loss, take_profit = make_trade_decision(df, model, scaler, use_hmm=False)
+    
+    # Define the quantity for trading
+    quantity = 100  # Example quantity in DOGE
+    
+    if action == 'Buy':
+        place_market_order(symbol, 'BUY', quantity, client)
+    elif action == 'Sell':
+        place_market_order(symbol, 'SELL', quantity, client)
 
-    # Gradient Boosting Prediction
-    X = df[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
-    X = scaler_gb.transform(X)
-    gb_prediction = model_gb.predict(X[-1].reshape(1, -1))[0]
+    # Add your trading logic here (e.g., stop loss, take profit)
 
-    # HMM Prediction
-    hmm_data = df[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
-    hidden_states, state_probs = predict_hmm(model_hmm, scaler_hmm, hmm_data)
-    action_hmm, state_probs_summary = make_decision_hmm(hidden_states, state_probs, hmm_data)
-
-    action = 'Hold'
-    if gb_prediction == 1 and action_hmm == 'Buy':
-        action = 'Buy'
-    elif gb_prediction == 0 and action_hmm == 'Sell':
-        action = 'Sell'
-
-    quantity = check_balance(symbol, quantity, action, client)
-    stop_loss = df['Low'].min()
-    take_profit = df['High'].max()
-
-    execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
-
-if __name__ == "__main__":
-    API_KEY = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
-    API_SECRET = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
-    client = Client(API_KEY, API_SECRET)
-
-    # Load Gradient Boosting model and scaler
-    with open('gradient_boosting_model.pkl', 'rb') as model_file:
-        model_gb = pickle.load(model_file)
-    with open('gradient_boosting_scaler.pkl', 'rb') as scaler_file:
-        scaler_gb = pickle.load(scaler_file)
-
-    # Load HMM model and scaler
-    with open('hmm_model.pkl', 'rb') as model_file:
-        model_hmm = pickle.load(model_file)
-    with open('hmm_scaler.pkl', 'rb') as scaler_file:
-        scaler_hmm = pickle.load(scaler_file)
-
-    SYMBOL = 'DOGEUSDT'
-    N_COMPONENTS = 3  # Adjust based on your model training
-    TRADE_QUANTITY = 10
-
-    while True:
-        try:
-            trade(SYMBOL, client, model_gb, scaler_gb, model_hmm, scaler_hmm, N_COMPONENTS, TRADE_QUANTITY)
-            time.sleep(3600)  # Wait for 1 hour before checking again
-        except Exception as e:
-            print(f"Error occurred: {e}")
-            time.sleep(60)  # Wait for a minute before retrying
+# Run the trading strategy every hour
+while True:
+    execute_trading_strategy()
+    time.sleep(3600)  # Wait for 1 hour

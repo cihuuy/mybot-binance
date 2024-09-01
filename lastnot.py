@@ -222,33 +222,41 @@ def main():
     api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
     client = Client(api_key, api_secret)
 
-    # Define trading symbol
+      # Define trading symbol
     symbol = 'DOGEUSDT'
 
-    # Get market data
-    df = get_market_data(symbol, client)
-    df = add_technical_indicators(df)
+    while True:
+        try:
+            # Get market data
+            df = get_market_data(symbol, client)
+            df = add_technical_indicators(df)
 
-    # Load model and scaler or train if not available
-    model, scaler = load_model_and_scaler()
-    if model is None or scaler is None:
-        model, scaler, _ = train_ai_model(df)
+            # Load model and scaler or train if not available
+            model, scaler = load_model_and_scaler()
+            if model is None or scaler is None:
+                model, scaler, _ = train_ai_model(df)
 
-    # Backtest the model
-    backtest_accuracy = backtest_model(df, model, scaler)
-    print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
+            # Backtest the model
+            backtest_accuracy = backtest_model(df, model, scaler)
+            print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
 
-    # Make trading decision
-    action, stop_loss, take_profit = make_trade_decision(df, model, scaler)
-    
-    # Determine the quantity to trade (example quantity)
-    quantity = 1.0
+            # Make trading decision
+            action, stop_loss, take_profit = make_trade_decision(df, model, scaler)
+            
+            # Determine the quantity to trade (example quantity)
+            quantity = 1.0
 
-    # Check balance and adjust quantity
-    quantity = check_balance(symbol, quantity, action, client)
+            # Check balance and adjust quantity
+            quantity = check_balance(symbol, quantity, action, client)
 
-    # Execute trade
-    execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
+            # Execute trade
+            execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
+
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+
+        # Wait for 15 minutes before the next iteration
+        time.sleep(15 * 60)
 
 if __name__ == "__main__":
     main()

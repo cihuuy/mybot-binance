@@ -53,7 +53,6 @@ def train_ai_model(data):
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    # Define parameter distributions
     param_distributions = {
         'n_estimators': [100, 200, 500, 1000],
         'max_depth': [3, 5, 7, 9],
@@ -63,35 +62,31 @@ def train_ai_model(data):
         'min_samples_leaf': [1, 2, 4]
     }
 
-    # Create RandomizedSearchCV object
+    tscv = TimeSeriesSplit(n_splits=5)
     random_search = RandomizedSearchCV(
         GradientBoostingClassifier(),
         param_distributions=param_distributions,
-        n_iter=100,  # Jumlah kombinasi parameter yang akan diuji
-        cv=TimeSeriesSplit(n_splits=5),
+        n_iter=100,
+        cv=tscv,
         scoring='accuracy',
         verbose=2,
         random_state=42
     )
-
-    # Fit the random search object to the data
     random_search.fit(X_train, y_train)
 
-    # Print the best parameters and score
+    best_model = random_search.best_estimator_
+    model_accuracy = accuracy_score(y_test, best_model.predict(X_test))
+    print(f"Model accuracy: {model_accuracy * 100:.2f}%")
     print("Best parameters found: ", random_search.best_params_)
     print("Best score: ", random_search.best_score_)
 
-    model = random_search.best_estimator_
-    model_accuracy = accuracy_score(y_test, model.predict(X_test))
-    print(f"Model accuracy: {model_accuracy * 100:.2f}%")
-
     # Save model and scaler
     with open('trading_model.pkl', 'wb') as model_file:
-        pickle.dump(model, model_file)
+        pickle.dump(best_model, model_file)
     with open('scaler.pkl', 'wb') as scaler_file:
         pickle.dump(scaler, scaler_file)
 
-    return model, scaler, model_accuracy
+    return best_model, scaler, model_accuracy
 
 # Backtest the model
 def backtest_model(data, model, scaler):
@@ -155,7 +150,6 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
             quantity = max_qty
         else:
             quantity = (quantity // step_size) * step_size
-        # Round quantity to the appropriate number of decimal places
         quantity = round(quantity, len(str(step_size).split('.')[1]))
     return quantity
 
@@ -199,9 +193,18 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
                 client.create_oco_order(symbol=symbol, side='SELL', quantity=quantity, price=limit_price, stopPrice=stop_price, stopLimitPrice=stop_price, stopLimitTimeInForce='GTC')
                 print(f"OCO order placed with Stop-Loss at {stop_loss:.6f} and Take-Profit at {take_profit:.6f}")
         elif action == 'Sell':
-            quantity = check_balance(symbol, quantity, action, client)
-            if quantity is None:
-                print(f"Tidak cukup saldo {symbol.replace('USDT', '')} untuk menjual.")
+            quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+            available_balance = client.get_asset_balance(asset=symbol.replace("USDT", ""))
+            if available_balance is None:
+                print(f"Tidak ditemukan saldo untuk {symbol.replace('USDT', '')}.")
+                return
+            available_quantity = float(available_balance['free'])
+            if available_quantity < quantity:
+                print(f"Tidak cukup saldo {symbol.replace('USDT', '')} untuk menjual {quantity:.6f}. Menyesuaikan jumlah menjadi {available_quantity:.6f}.")
+                quantity = available_quantity
+                quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+            if quantity <= 0:
+                print(f"Tidak ada jumlah yang valid untuk menjual.")
                 return
             order = client.order_market_sell(symbol=symbol, quantity=quantity)
             print(f"Sell order placed: {order}")
@@ -212,24 +215,39 @@ def execute_trade(action, symbol, quantity, client, stop_loss=None, take_profit=
     except Exception as e:
         print(f"Error executing trade: {e}")
 
+# Main function to run the trading strategy
 def main():
+    # Initialize Binance client
     api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
     api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
     client = Client(api_key, api_secret)
 
+    # Define trading symbol
     symbol = 'DOGEUSDT'
-    data = get_market_data(symbol, client)
-    data = add_technical_indicators(data)
 
+    # Get market data
+    df = get_market_data(symbol, client)
+    df = add_technical_indicators(df)
+
+    # Load model and scaler or train if not available
     model, scaler = load_model_and_scaler()
     if model is None or scaler is None:
-        model, scaler, _ = train_ai_model(data)
+        model, scaler, _ = train_ai_model(df)
 
-    backtest_accuracy = backtest_model(data, model, scaler)
+    # Backtest the model
+    backtest_accuracy = backtest_model(df, model, scaler)
+    print(f"Backtest accuracy: {backtest_accuracy * 100:.2f}%")
+
+    # Make trading decision
+    action, stop_loss, take_profit = make_trade_decision(df, model, scaler)
     
-    action, stop_loss, take_profit = make_trade_decision(data, model, scaler)
-    available_balance = client.get_asset_balance(asset='USDT')['free']
-    quantity = float(available_balance) / float(client.get_symbol_ticker(symbol=symbol)['price'])
+    # Determine the quantity to trade (example quantity)
+    quantity = 1.0
+
+    # Check balance and adjust quantity
+    quantity = check_balance(symbol, quantity, action, client)
+
+    # Execute trade
     execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
 
 if __name__ == "__main__":

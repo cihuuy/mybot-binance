@@ -1,8 +1,3 @@
-import pandas as pd
-import numpy as np
-import talib
-import pickle
-import time
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
@@ -11,6 +6,11 @@ from hmmlearn import hmm
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from datetime import datetime
+import pandas as pd
+import numpy as np
+import talib
+import pickle
+import time
 
 # Fungsi untuk mendapatkan data pasar dari Binance API
 def get_market_data(symbol, client, interval='15m', limit=1000):
@@ -266,7 +266,9 @@ client = Client(api_key, api_secret)
 # Jalankan bot trading setiap 15 menit
 while True:
     try:
+        current_time = time.time()
         server_time = client.get_server_time()
+        print(f"Waktu sistem saat ini: {datetime.fromtimestamp(current_time)}")
         print(f"Waktu server Binance: {datetime.fromtimestamp(server_time['serverTime'] / 1000)}")
         trade_bot('DOGEUSDT', client)
     except Exception as e:

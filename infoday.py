@@ -110,4 +110,53 @@ else:
     X_train, vectorizer = extract_features(dummy_articles)
     y_train = np.array(dummy_labels)
     
-    model = train_model(X_train, y_train
+    model = train_model(X_train, y_train)
+    with open('model.pkl', 'wb') as f:
+        pickle.dump(model, f)
+    with open('vectorizer.pkl', 'wb') as f:
+        pickle.dump(vectorizer, f)
+
+while True:
+    articles = get_news(keywords, page_size=5)
+
+    if articles:
+        relevant_articles = [article for article in articles if is_relevant_article(article, keywords, price_related_terms)]
+        
+        if relevant_articles:
+            sentiments = []
+            for article in relevant_articles:
+                title = article['title']
+                description = article['description'] if article['description'] else ""
+                source = article['source']['name']
+                published_at = article['publishedAt']
+                content = title + ". " + description
+                sentiment = analyze_sentiment_vader(content)
+                sentiments.append(sentiment)
+
+                print(f"Title: {title}")
+                print(f"Description: {description}")
+                print(f"Source: {source}")
+                print(f"Published At: {published_at}")
+                print(f"Sentiment (VADER): {sentiment}")
+                print("---")
+
+            X_test, _ = extract_features(relevant_articles, vectorizer)
+
+            decision, confidence_percentage = make_trading_decision_with_model(model, X_test)
+            print(f"Trading Decision: {decision}")
+            print(f"Confidence Percentage: {confidence_percentage:.2f}%")
+
+            if decision == "Buy":
+                print("Executing Buy trade...")
+                # buy_doge()
+            elif decision == "Sell":
+                print("Executing Sell trade...")
+                # sell_doge()
+            else:
+                print("Holding position. No trade executed.")
+        else:
+            print("No relevant articles found.")
+    else:
+        print("No articles found.")
+
+    time.sleep(600)  # Tunggu 10 menit sebelum loop berikutnya

@@ -39,19 +39,30 @@ def predict(model, scaler, data):
     print("Predicting hidden states...")
     data_scaled = scaler.transform(data)
     hidden_states = model.predict(data_scaled)
-    return hidden_states
+    
+    # Probabilitas dari prediksi
+    state_probs = model.predict_proba(data_scaled)
+    return hidden_states, state_probs
 
 # Fungsi untuk mengambil keputusan trading
-def make_decision(hidden_states, data):
-    # Implementasikan logika keputusan trading berdasarkan hidden states
-    # Misalnya: Jika hidden state terakhir menunjukkan tren naik, maka beli
-    latest_state = hidden_states[-1]
-    if latest_state == 0:  # Ganti dengan logika yang sesuai
-        return 'Buy'
-    elif latest_state == 1:  # Ganti dengan logika yang sesuai
-        return 'Sell'
-    else:
-        return 'Hold'
+def make_decision(hidden_states, state_probs, data):
+    # Ambil probabilitas untuk keadaan terakhir
+    latest_state_probs = state_probs[-1]
+    
+    # Contoh logika pengambilan keputusan
+    state_labels = ['State 0', 'State 1', 'State 2']  # Ubah sesuai jumlah komponen
+    max_prob_state = np.argmax(latest_state_probs)
+    action = 'Hold'
+    
+    if latest_state_probs[max_prob_state] > 0.6:  # Contoh threshold untuk keputusan
+        if max_prob_state == 0:
+            action = 'Buy'
+        elif max_prob_state == 1:
+            action = 'Sell'
+    
+    print(f"Latest State Probabilities: {dict(zip(state_labels, latest_state_probs))}")
+    print(f"Trade decision: {action}")
+    return action
 
 # Fungsi untuk menyesuaikan jumlah agar sesuai dengan LOT_SIZE
 def adjust_quantity_to_lot_size(symbol, quantity, client):
@@ -105,14 +116,14 @@ def main():
             # Ambil data harga terbaru
             new_data = get_data(symbol, '1h', 1000, client)  # Ambil data hingga waktu terkini
 
-            # Melatih ulang model dengan data terbaru (opsional)
+            # Latih ulang model dengan data terbaru (opsional)
             model, scaler = train_hmm(new_data[['Close']], n_components=3)
 
             # Buat prediksi
-            hidden_states = predict(model, scaler, new_data[['Close']])
+            hidden_states, state_probs = predict(model, scaler, new_data[['Close']])
             
             # Ambil keputusan trading
-            action = make_decision(hidden_states, new_data)
+            action = make_decision(hidden_states, state_probs, new_data)
             
             # Tentukan jumlah untuk trading (contoh jumlah)
             quantity = 1.0

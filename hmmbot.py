@@ -139,7 +139,7 @@ def make_trade_decision(data, model, scaler, use_hmm=False):
         hidden_states, state_probs = predict_hmm(model, scaler, data[['Close']])
         latest_state_probs = state_probs[-1]
         
-        state_labels = ['State 0', 'State 1', 'State 2']
+        state_labels = [f'State {i}' for i in range(len(latest_state_probs))]
         max_prob_state = np.argmax(latest_state_probs)
         action = 'Hold'
         
@@ -182,75 +182,79 @@ def adjust_quantity_to_lot_size(symbol, quantity, client):
             quantity = min_qty
         elif quantity > max_qty:
             quantity = max_qty
-        quantity = round(quantity - (quantity % step_size), 8)
-    return quantity
-
-# Fungsi untuk menghitung jumlah kuantitas pembelian
-def calculate_quantity(symbol, price, client):
-    balance_info = client.get_asset_balance(asset='USDT')
-    available_balance = float(balance_info['free'])
-    quantity = available_balance / price
-    quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
-    return quantity
-
-# Fungsi untuk menempatkan order dengan kuantitas yang disesuaikan
-def place_order(client, symbol, action, price, stop_loss, take_profit, quantity):
-    try:
-        if action == 'Buy':
-            # Membuat order beli pasar dengan kuantitas yang disesuaikan
-            order = client.order_market_buy(
-                symbol=symbol,
-                quantity=quantity
-            )
-        elif action == 'Sell':
-            # Membuat order jual pasar dengan kuantitas yang disesuaikan
-            order = client.order_market_sell(
-                symbol=symbol,
-                quantity=quantity
-            )
         else:
-            print("Tidak ada aksi yang valid ditentukan.")
-            return None
+            quantity = quantity - (quantity % step_size)
+    return quantity
 
-        print(f"Order {action} berhasil ditempatkan dengan ID order: {order['orderId']}")
-        print(f"Stop-Loss: {stop_loss}")
-        print(f"Take-Profit: {take_profit}")
-
+# Fungsi untuk memverifikasi saldo dan melakukan perdagangan
+def execute_trade(symbol, side, quantity, client, stop_loss=None, take_profit=None):
+    try:
+        balance = client.get_asset_balance(asset=symbol.replace('USDT', ''))
+        usdt_balance = client.get_asset_balance(asset='USDT')
+        if side.upper() == 'BUY' and float(usdt_balance['free']) < quantity * 1.02:  # Margin keamanan
+            print("Tidak cukup saldo USDT untuk membeli.")
+            return
+        elif side.upper() == 'SELL' and float(balance['free']) < quantity:
+            print(f"Tidak cukup saldo {symbol} untuk menjual.")
+            return
+        # Sesuaikan kuantitas ke LOT_SIZE
+        quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
+        if quantity == 0:
+            print("Kuantitas perdagangan yang disesuaikan adalah 0. Perdagangan dibatalkan.")
+            return
+        order = client.create_order(
+            symbol=symbol,
+            side=side.upper(),
+            type='MARKET',
+            quantity=quantity
+        )
+        print(f"Perdagangan berhasil: {order}")
+        if stop_loss and take_profit:
+            # Tempatkan order stop-loss dan take-profit
+            stop_loss_order = client.create_order(
+                symbol=symbol,
+                side='SELL' if side.upper() == 'BUY' else 'BUY',
+                type='STOP_MARKET',
+                stopPrice=stop_loss,
+                quantity=quantity
+            )
+            take_profit_order = client.create_order(
+                symbol=symbol,
+                side='SELL' if side.upper() == 'BUY' else 'BUY',
+                type='TAKE_PROFIT_MARKET',
+                stopPrice=take_profit,
+                quantity=quantity
+            )
+            print(f"Stop-Loss dan Take-Profit telah dipasang: {stop_loss_order}, {take_profit_order}")
     except BinanceAPIException as e:
-        print(f"Terjadi kesalahan saat menempatkan order {action}: {str(e)}")
+        print(f"Kesalahan API Binance: {e}")
 
-def main():
-    api_key = "h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a"
-    api_secret = "Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS"
-    client = Client(api_key, api_secret)
-
+# Fungsi utama untuk menjalankan bot perdagangan
+def run_trading_bot(symbol, client, interval='15m'):
+    print("Memulai bot perdagangan...")
     model, scaler = load_model_and_scaler()
     if model is None or scaler is None:
-        symbol = 'DOGEUSDT'
-        data = get_market_data(symbol, client)
-        data = add_technical_indicators(data)
-        model, scaler, _ = train_ai_model(data)
-
+        print("Melatih model baru karena model tidak ditemukan...")
+        market_data = get_market_data(symbol, client, interval=interval)
+        market_data = add_technical_indicators(market_data)
+        model, scaler, accuracy = train_ai_model(market_data)
+        backtest_accuracy = backtest_model(market_data, model, scaler)
     while True:
-        try:
-            symbol = 'DOGEUSDT'
-            data = get_market_data(symbol, client)
-            data = add_technical_indicators(data)
+        market_data = get_market_data(symbol, client, interval=interval)
+        market_data = add_technical_indicators(market_data)
+        decision, stop_loss, take_profit = make_trade_decision(market_data, model, scaler, use_hmm=False)
+        print(f"Keputusan perdagangan: {decision}")
+        if decision != 'Hold':
+            execute_trade(symbol, decision, quantity=100, client=client, stop_loss=stop_loss, take_profit=take_profit)
+        time.sleep(900)  # Menunggu selama 15 menit sebelum memeriksa kembali
 
-            action, stop_loss, take_profit = make_trade_decision(data, model, scaler)
+# Contoh inisialisasi client Binance
+api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+client = Client(api_key, api_secret)
 
-            price = data['Close'].iloc[-1]
-            quantity = calculate_quantity(symbol, price, client)
+# Simbol perdagangan yang dipantau
+symbol = 'DOGEUSDT'
 
-            if quantity > 0:
-                place_order(client, symbol, action, price, stop_loss, take_profit, quantity)
-
-            print("Menunggu 15 menit sebelum eksekusi berikutnya.")
-            time.sleep(15 * 60)  # Tunggu 15 menit
-
-        except Exception as e:
-            print(f"Terjadi kesalahan: {str(e)}")
-            time.sleep(60)  # Tunggu 1 menit sebelum mencoba lagi jika terjadi kesalahan
-
-if __name__ == "__main__":
-    main()
+# Menjalankan bot perdagangan
+run_trading_bot(symbol, client, interval='15m')

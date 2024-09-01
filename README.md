@@ -6,7 +6,7 @@
 4. ./configure --prefix=/usr
 5. make
 6. sudo make install
-7.  pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance
+7.  pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance hmmlearn
 8.  
 
 ##instal def python

@@ -222,7 +222,7 @@ def main():
     api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
     client = Client(api_key, api_secret)
 
-      # Define trading symbol
+    # Define trading symbol
     symbol = 'DOGEUSDT'
 
     while True:
@@ -251,6 +251,13 @@ def main():
 
             # Execute trade
             execute_trade(action, symbol, quantity, client, stop_loss, take_profit)
+
+            # Print model accuracy
+            model_accuracy = accuracy_score(
+                df[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna(),
+                model.predict(scaler.transform(df[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()))
+            )
+            print(f"Model accuracy during trading: {model_accuracy * 100:.2f}%")
 
         except Exception as e:
             print(f"Error in main loop: {e}")

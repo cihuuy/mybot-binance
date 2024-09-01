@@ -132,129 +132,143 @@ def predict_hmm(model, scaler, data):
     state_probs = model.predict_proba(data_scaled)
     return hidden_states, state_probs
 
-# Fungsi untuk membuat keputusan perdagangan
-def make_trade_decision(data, model, scaler, use_hmm=False):
-    if use_hmm:
-        # Keputusan menggunakan HMM
-        hidden_states, state_probs = predict_hmm(model, scaler, data[['Close']])
-        latest_state_probs = state_probs[-1]
-        
-        state_labels = [f'State {i}' for i in range(len(latest_state_probs))]
-        max_prob_state = np.argmax(latest_state_probs)
-        action = 'Hold'
-        
-        if latest_state_probs[max_prob_state] > 0.6:
-            if max_prob_state == 0:
-                action = 'Buy'
-            elif max_prob_state == 1:
-                action = 'Sell'
-        
-        state_probs_summary = dict(zip(state_labels, latest_state_probs))
-        print(f"Probabilitas Keadaan Terbaru: {state_probs_summary}")
-        print(f"Keputusan perdagangan (HMM): {action}")
-        return action, state_probs_summary
+# Fungsi untuk membuat keputusan perdagangan berdasarkan perbandingan model
+def make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler):
+    # Keputusan menggunakan AI (Gradient Boosting)
+    X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
+    X_scaled = gb_scaler.transform(X)
+    gb_prediction = gb_model.predict(X_scaled[-1:])
+    gb_action = 'Buy' if gb_prediction == 1 else 'Sell'
     
-    else:
-        # Keputusan menggunakan AI
-        X = data[['SMA', 'RSI', 'MACD', 'MACD_SIGNAL', 'MACD_HIST', 'BB_upper', 'BB_middle', 'BB_lower', 'ATR']].dropna()
-        X_scaled = scaler.transform(X)
-        prediction = model.predict(X_scaled[-1:])
-        stop_loss_pct = model.predict_proba(X_scaled[-1:])[0][1] * 0.02  # Contoh multiplier untuk penyesuaian risiko
-        take_profit_pct = model.predict_proba(X_scaled[-1:])[0][0] * 0.02  # Contoh multiplier untuk penyesuaian reward
-        current_price = data['Close'].iloc[-1]
-        stop_loss = current_price * (1 - stop_loss_pct)
-        take_profit = current_price * (1 + take_profit_pct)
-        action = 'Buy' if prediction == 1 else 'Sell'
-        print(f"Keputusan perdagangan (AI): {action}")
-        print(f"Stop-Loss yang dihitung: {stop_loss:.6f}")
-        print(f"Take-Profit yang dihitung: {take_profit:.6f}")
-        return action, stop_loss, take_profit
+    # Keputusan menggunakan HMM
+    hmm_hidden_states, hmm_state_probs = predict_hmm(hmm_model, hmm_scaler, data[['Close']])
+    latest_hmm_state_probs = hmm_state_probs[-1]
+    hmm_action = 'Hold'
+    
+    if latest_hmm_state_probs[0] > 0.6:
+        hmm_action = 'Buy'
+    elif latest_hmm_state_probs[1] > 0.6:
+        hmm_action = 'Sell'
+    
+    print(f"Keputusan Gradient Boosting: {gb_action}")
+    print(f"Keputusan HMM: {hmm_action}")
+    
+    # Perbandingan keputusan
+    if gb_action == 'Buy' and hmm_action == 'Buy':
+        final_decision = 'Buy'
+    elif gb_action == 'Buy' and hmm_action == 'Sell':
+        final_decision = 'Hold'
+    elif gb_action == 'Sell' and hmm_action == 'Buy':
+        final_decision = 'Hold'
+    elif gb_action == 'Sell' and hmm_action == 'Sell':
+        final_decision = 'Sell'
+    elif gb_action == 'Buy' and hmm_action == 'Hold':
+        final_decision = 'Hold' 
+    elif gb_action == 'Sell' and hmm_action == 'Hold':
+        final_decision = 'Hold' 
+    else:  # gb_action == 'Sell' and hmm_action == 'Sell'
+        final_decision = 'Hold'
+    
+    print(f"Keputusan akhir perdagangan: {final_decision}")
+    
+    # Menghitung stop_loss dan take_profit
+    stop_loss_pct = gb_model.predict_proba(X_scaled[-1:])[0][1] * 0.02
+    take_profit_pct = gb_model.predict_proba(X_scaled[-1:])[0][0] * 0.02
+    current_price = data['Close'].iloc[-1]
+    stop_loss = current_price * (1 - stop_loss_pct)
+    take_profit = current_price * (1 + take_profit_pct)
+    
+    return final_decision, stop_loss, take_profit
 
 # Fungsi untuk menyesuaikan kuantitas agar sesuai dengan LOT_SIZE
 def adjust_quantity_to_lot_size(symbol, quantity, client):
     exchange_info = client.get_symbol_info(symbol)
     lot_size_info = next(filter(lambda x: x['filterType'] == 'LOT_SIZE', exchange_info['filters']), None)
-    if lot_size_info is not None:
-        min_qty = float(lot_size_info['minQty'])
-        max_qty = float(lot_size_info['maxQty'])
+    if lot_size_info:
         step_size = float(lot_size_info['stepSize'])
-        if quantity < min_qty:
-            quantity = min_qty
-        elif quantity > max_qty:
-            quantity = max_qty
-        else:
-            quantity = quantity - (quantity % step_size)
+        quantity = round(quantity - (quantity % step_size), len(str(step_size).split('.')[1]))
     return quantity
 
-# Fungsi untuk memverifikasi saldo dan melakukan perdagangan
-def execute_trade(symbol, side, quantity, client, stop_loss=None, take_profit=None):
-    try:
-        balance = client.get_asset_balance(asset=symbol.replace('USDT', ''))
-        usdt_balance = client.get_asset_balance(asset='USDT')
-        if side.upper() == 'BUY' and float(usdt_balance['free']) < quantity * 1.02:  # Margin keamanan
-            print("Tidak cukup saldo USDT untuk membeli.")
+# Fungsi untuk memeriksa saldo
+def check_balance(asset, client):
+    balance_info = client.get_asset_balance(asset=asset)
+    balance = float(balance_info['free'])
+    return balance
+
+# Fungsi utama trading bot
+def trade_bot(symbol, client):
+    # Muat atau latih model AI dan scaler
+    gb_model, gb_scaler = load_model_and_scaler()
+    if gb_model is None or gb_scaler is None:
+        df = get_market_data(symbol, client)
+        df = add_technical_indicators(df)
+        gb_model, gb_scaler, _ = train_ai_model(df)
+    
+    # Dapatkan data pasar terbaru
+    df = get_market_data(symbol, client)
+    df = add_technical_indicators(df)
+    
+    # Melatih model HMM
+    hmm_model, hmm_scaler = train_hmm(df[['Close']], n_components=2)
+    
+    # Buat keputusan perdagangan berdasarkan perbandingan model
+    decision, stop_loss, take_profit = make_trade_decision(df, gb_model, gb_scaler, hmm_model, hmm_scaler)
+    
+    if decision == 'Buy':
+        # Memastikan hanya membeli dengan saldo yang tersedia
+        base_asset = symbol[:-4]
+        quote_asset = symbol[-4:]
+        balance = check_balance(quote_asset, client)
+        if balance <= 0:
+            print(f"Tidak ada saldo yang tersedia untuk membeli {base_asset}.")
             return
-        elif side.upper() == 'SELL' and float(balance['free']) < quantity:
-            print(f"Tidak cukup saldo {symbol} untuk menjual.")
-            return
-        # Sesuaikan kuantitas ke LOT_SIZE
+        
+        price = df['Close'].iloc[-1]
+        quantity = balance / price
         quantity = adjust_quantity_to_lot_size(symbol, quantity, client)
-        if quantity == 0:
-            print("Kuantitas perdagangan yang disesuaikan adalah 0. Perdagangan dibatalkan.")
+        min_notional = float(client.get_symbol_info(symbol)['filters'][2]['minNotional'])
+        if quantity * price < min_notional:
+            print(f"Jumlah minimum untuk diperdagangkan adalah {min_notional}.")
             return
-        order = client.create_order(
-            symbol=symbol,
-            side=side.upper(),
-            type='MARKET',
-            quantity=quantity
-        )
-        print(f"Perdagangan berhasil: {order}")
-        if stop_loss and take_profit:
-            # Tempatkan order stop-loss dan take-profit
-            stop_loss_order = client.create_order(
-                symbol=symbol,
-                side='SELL' if side.upper() == 'BUY' else 'BUY',
-                type='STOP_MARKET',
-                stopPrice=stop_loss,
-                quantity=quantity
-            )
-            take_profit_order = client.create_order(
-                symbol=symbol,
-                side='SELL' if side.upper() == 'BUY' else 'BUY',
-                type='TAKE_PROFIT_MARKET',
-                stopPrice=take_profit,
-                quantity=quantity
-            )
-            print(f"Stop-Loss dan Take-Profit telah dipasang: {stop_loss_order}, {take_profit_order}")
-    except BinanceAPIException as e:
-        print(f"Kesalahan API Binance: {e}")
+        
+        # Pasang order beli
+        try:
+            order = client.order_market_buy(symbol=symbol, quantity=quantity)
+            print(f"Order beli berhasil: {order}")
+        except BinanceAPIException as e:
+            print(f"Error saat melakukan order beli: {str(e)}")
+            return
+        
+    elif decision == 'Sell':
+        # Memastikan hanya menjual dengan saldo yang tersedia
+        balance = check_balance(symbol[:-4], client)
+        if balance <= 0:
+            print(f"Tidak ada saldo yang tersedia untuk menjual {symbol[:-4]}.")
+            return
+        
+        quantity = adjust_quantity_to_lot_size(symbol, balance, client)
+        
+        # Pasang order jual
+        try:
+            order = client.order_market_sell(symbol=symbol, quantity=quantity)
+            print(f"Order jual berhasil: {order}")
+        except BinanceAPIException as e:
+            print(f"Error saat melakukan order jual: {str(e)}")
+            return
 
-# Fungsi utama untuk menjalankan bot perdagangan
-def run_trading_bot(symbol, client, interval='15m'):
-    print("Memulai bot perdagangan...")
-    model, scaler = load_model_and_scaler()
-    if model is None or scaler is None:
-        print("Melatih model baru karena model tidak ditemukan...")
-        market_data = get_market_data(symbol, client, interval=interval)
-        market_data = add_technical_indicators(market_data)
-        model, scaler, accuracy = train_ai_model(market_data)
-        backtest_accuracy = backtest_model(market_data, model, scaler)
-    while True:
-        market_data = get_market_data(symbol, client, interval=interval)
-        market_data = add_technical_indicators(market_data)
-        decision, stop_loss, take_profit = make_trade_decision(market_data, model, scaler, use_hmm=False)
-        print(f"Keputusan perdagangan: {decision}")
-        if decision != 'Hold':
-            execute_trade(symbol, decision, quantity=100, client=client, stop_loss=stop_loss, take_profit=take_profit)
-        time.sleep(900)  # Menunggu selama 15 menit sebelum memeriksa kembali
+    print(f"Stop Loss: {stop_loss}, Take Profit: {take_profit}")
 
-# Contoh inisialisasi client Binance
+# Inisialisasi API Binance
 api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
 api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
 client = Client(api_key, api_secret)
 
-# Simbol perdagangan yang dipantau
-symbol = 'DOGEUSDT'
-
-# Menjalankan bot perdagangan
-run_trading_bot(symbol, client, interval='15m')
+# Jalankan bot trading setiap 15 menit
+while True:
+    try:
+        server_time = client.get_server_time()
+        print(f"Waktu server Binance: {datetime.fromtimestamp(server_time['serverTime'] / 1000)}")
+        trade_bot('DOGEUSDT', client)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+    time.sleep(900)  # 15 menit

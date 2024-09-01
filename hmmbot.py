@@ -220,8 +220,8 @@ def place_order(client, symbol, action, price, stop_loss, take_profit, quantity)
         print(f"Terjadi kesalahan saat menempatkan order {action}: {str(e)}")
 
 def main():
-    api_key = "your_binance_api_key"
-    api_secret = "your_binance_api_secret"
+    api_key = "h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a"
+    api_secret = "Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS"
     client = Client(api_key, api_secret)
 
     model, scaler = load_model_and_scaler()

@@ -1,52 +1,93 @@
-import tweepy
+import requests
+import time
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from textblob import TextBlob
 import nltk
+from datetime import datetime, timedelta
 
-# Pastikan untuk mengunduh dataset VADER terlebih dahulu
+# Pastikan VADER lexicon sudah diunduh
 nltk.download('vader_lexicon')
 
-# Konfigurasi API Twitter (ganti dengan API key Anda sendiri)
-consumer_key = 'lZn1GEqhvdBUnE8svfWn8O6ua'
-consumer_secret = 'RMbVP8yQ2flcTTM0ebuWRGQ9b993yinZjTTRIqWm8SFnys5bJC'
-access_token = '1786582804786200576-VNzTlYH3gOFZC7MH2Len6Lurfwmp9f'
-access_token_secret = '1Qh3KRSEvydtAE5oqbk7Dztu02WNmrWtkYA1uJcgGi3xw'
+# API Key untuk NewsAPI
+api_key = '8c829b1bdcfe4f12ada6688a781e12cc'
 
-# Autentikasi Twitter API
-auth = tweepy.OAuth1UserHandler(consumer_key, consumer_secret, access_token, access_token_secret)
-api = tweepy.API(auth)
-
-# Fungsi untuk mengambil tweet terkait aset kripto
-def get_tweets(keyword, count=100):
-    tweets = tweepy.Cursor(api.search_tweets, q=keyword, lang="en").items(count)
-    tweet_list = [tweet.text for tweet in tweets]
-    return tweet_list
-
-# Analisis sentimen menggunakan VADER
-def analyze_sentiment_vader(tweet):
-    sia = SentimentIntensityAnalyzer()
-    sentiment = sia.polarity_scores(tweet)
-    return sentiment
-
-# Analisis sentimen menggunakan TextBlob
-def analyze_sentiment_textblob(tweet):
-    analysis = TextBlob(tweet)
-    sentiment = {
-        'polarity': analysis.polarity,
-        'subjectivity': analysis.subjectivity
-    }
-    return sentiment
-
-# Contoh penggunaan
-if __name__ == "__main__":
-    keyword = 'Dogecoin'  # Ganti dengan aset kripto yang Anda inginkan
-    tweets = get_tweets(keyword, count=100)
-
-    for tweet in tweets:
-        vader_sentiment = analyze_sentiment_vader(tweet)
-        textblob_sentiment = analyze_sentiment_textblob(tweet)
+def get_news(queries, language='en', from_date=None, page_size=10):
+    articles = []
+    if not from_date:
+        # Mengatur tanggal satu minggu yang lalu
+        from_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    
+    for query in queries:
+        url = f'https://newsapi.org/v2/everything?q={query}&from={from_date}&language={language}&pageSize={page_size}&apiKey={api_key}'
+        response = requests.get(url)
         
-        print(f"Tweet: {tweet}")
-        print(f"VADER Sentiment: {vader_sentiment}")
-        print(f"TextBlob Sentiment: {textblob_sentiment}")
-        print("-" * 50)
+        if response.status_code == 200:
+            news_data = response.json()
+            articles.extend(news_data['articles'])
+        else:
+            print(f"Error fetching data for {query}: {response.status_code}")
+    return articles
+
+# Analisis Sentimen dengan VADER
+def analyze_sentiment_vader(text):
+    sia = SentimentIntensityAnalyzer()
+    sentiment = sia.polarity_scores(text)
+    return sentiment
+
+# Membuat keputusan trading berdasarkan sentimen pasar
+def make_trading_decision(sentiments):
+    average_sentiment = sum([s['compound'] for s in sentiments]) / len(sentiments)
+    if average_sentiment > 0.05:
+        return "Buy"
+    elif average_sentiment < -0.05:
+        return "Sell"
+    else:
+        return "Hold"
+
+# Kata kunci yang ingin dicari
+keywords = ["Dogecoin", "DOGEUSDT", "cryptocurrency"]
+
+while True:
+    # Mendapatkan berita dari satu minggu terakhir
+    articles = get_news(keywords, page_size=5)
+
+    if articles:
+        sentiments = []
+        for article in articles:
+            title = article['title']
+            description = article['description'] if article['description'] else ""
+            source = article['source']['name']
+            published_at = article['publishedAt']
+            content = title + ". " + description
+            sentiment = analyze_sentiment_vader(content)
+            sentiments.append(sentiment)
+
+            print(f"Title: {title}")
+            print(f"Description: {description}")
+            print(f"Source: {source}")
+            print(f"Published At: {published_at}")
+            print(f"Sentiment (VADER): {sentiment}")
+            print("---")
+
+        # Membuat keputusan trading
+        decision = make_trading_decision(sentiments)
+        print(f"Trading Decision: {decision}")
+
+        # Implementasikan eksekusi trading berdasarkan keputusan
+        # Misalnya, eksekusi order di Binance API
+        
+        if decision == "Buy":
+            # Panggil fungsi untuk membeli DOGE
+            print("Executing Buy trade...")
+            # buy_doge()
+        elif decision == "Sell":
+            # Panggil fungsi untuk menjual DOGE
+            print("Executing Sell trade...")
+            # sell_doge()
+        else:
+            print("Holding position. No trade executed.")
+        
+    else:
+        print("Tidak ada artikel ditemukan.")
+
+    # Tunggu 1 jam sebelum loop berikutnya
+    time.sleep(3600)

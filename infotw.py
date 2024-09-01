@@ -14,7 +14,7 @@ def get_news(queries, language='en', from_date=None, page_size=10):
     articles = []
     if not from_date:
         # Mengatur tanggal satu minggu yang lalu
-        from_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        from_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
     for query in queries:
         url = f'https://newsapi.org/v2/everything?q={query}&from={from_date}&language={language}&pageSize={page_size}&apiKey={api_key}'
@@ -36,12 +36,16 @@ def analyze_sentiment_vader(text):
 # Membuat keputusan trading berdasarkan sentimen pasar
 def make_trading_decision(sentiments):
     average_sentiment = sum([s['compound'] for s in sentiments]) / len(sentiments)
+    percentage = (average_sentiment + 1) * 50  # Mengubah nilai -1 to 1 menjadi 0 to 100 persen
+    
     if average_sentiment > 0.05:
-        return "Buy"
+        action = "Buy"
     elif average_sentiment < -0.05:
-        return "Sell"
+        action = "Sell"
     else:
-        return "Hold"
+        action = "Hold"
+    
+    return action, percentage
 
 # Kata kunci yang ingin dicari
 keywords = ["Dogecoin", "DOGEUSDT", "cryptocurrency"]
@@ -69,8 +73,9 @@ while True:
             print("---")
 
         # Membuat keputusan trading
-        decision = make_trading_decision(sentiments)
+        decision, percentage = make_trading_decision(sentiments)
         print(f"Trading Decision: {decision}")
+        print(f"Confidence Percentage: {percentage:.2f}%")
 
         # Implementasikan eksekusi trading berdasarkan keputusan
         # Misalnya, eksekusi order di Binance API

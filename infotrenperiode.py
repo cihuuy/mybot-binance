@@ -1,8 +1,13 @@
 import requests
 import time
+import numpy as np
+import pickle
+import os
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-import nltk
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import SVC
 from datetime import datetime, timedelta
+import nltk
 
 # Pastikan VADER lexicon sudah diunduh
 nltk.download('vader_lexicon')
@@ -13,7 +18,6 @@ api_key = '8c829b1bdcfe4f12ada6688a781e12cc'
 def get_news(queries, language='en', from_date=None, page_size=10):
     articles = []
     if not from_date:
-        # Mengatur tanggal satu hari yang lalu
         from_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
     for query in queries:
@@ -30,18 +34,28 @@ def get_news(queries, language='en', from_date=None, page_size=10):
 def is_relevant_article(article, keywords, price_related_terms):
     title = article.get('title', '').lower()
     description = article.get('description', '').lower()
-    
-    # Memeriksa apakah artikel relevan berdasarkan kata kunci dan istilah terkait harga
     return any(keyword.lower() in title or keyword.lower() in description for keyword in keywords) or \
            any(term.lower() in title or term.lower() in description for term in price_related_terms)
 
-# Analisis Sentimen dengan VADER
 def analyze_sentiment_vader(text):
     sia = SentimentIntensityAnalyzer()
     sentiment = sia.polarity_scores(text)
     return sentiment
 
-# Membuat keputusan trading berdasarkan sentimen pasar
+def extract_features(articles, vectorizer=None):
+    texts = [article['title'] + ' ' + article['description'] for article in articles]
+    if vectorizer is None:
+        vectorizer = TfidfVectorizer()
+        X = vectorizer.fit_transform(texts)
+    else:
+        X = vectorizer.transform(texts)
+    return X, vectorizer
+
+def train_model(X, y):
+    clf = SVC(kernel='linear', probability=True)
+    clf.fit(X, y)
+    return clf
+
 def make_trading_decision(sentiments):
     average_sentiment = sum([s['compound'] for s in sentiments]) / len(sentiments) if sentiments else 0
     percentage = (average_sentiment + 1) * 50  # Mengubah nilai -1 to 1 menjadi 0 to 100 persen
@@ -55,12 +69,54 @@ def make_trading_decision(sentiments):
     
     return action, percentage, average_sentiment
 
-# Kata kunci yang ingin dicari
+def make_trading_decision_with_model(model, X_test):
+    predictions_proba = model.predict_proba(X_test)
+    predicted_class = model.predict(X_test)
+    
+    # Ambil probabilitas untuk kelas yang diprediksi
+    max_proba = np.max(predictions_proba)
+    confidence_percentage = max_proba * 100
+
+    if predicted_class[0] == 1:
+        action = "Buy"
+    elif predicted_class[0] == -1:
+        action = "Sell"
+    else:
+        action = "Hold"
+
+    return action, confidence_percentage
+
 keywords = ["dogecoin", "dogeusdt", "cryptocurrency", "price", "market", "value", "investment", "news"]
 price_related_terms = ["price", "market", "value", "investment"]
 
+# Load atau train model
+if os.path.exists('model.pkl'):
+    with open('model.pkl', 'rb') as f:
+        model = pickle.load(f)
+        vectorizer = pickle.load(open('vectorizer.pkl', 'rb'))
+else:
+    # Persiapkan data pelatihan (X_train, y_train) untuk contoh
+    dummy_articles = [
+        {'title': 'Dogecoin rises in price', 'description': 'The price of Dogecoin has increased significantly.'},
+        {'title': 'Market trends for cryptocurrency', 'description': 'The market trends show a rise in value.'},
+        {'title': 'Investment in Dogecoin', 'description': 'Investors are showing interest in Dogecoin.'},
+        {'title': 'Cryptocurrency market crash', 'description': 'The market has experienced a significant drop in value.'},
+        {'title': 'Dogecoin stability', 'description': 'Dogecoin shows stable performance despite market fluctuations.'}
+    ]
+    
+    dummy_labels = [1, 1, 1, -1, 0]  # 1 untuk Buy, -1 untuk Sell, 0 untuk Hold
+    
+    # Ekstrak fitur dan latih model
+    X_train, vectorizer = extract_features(dummy_articles)
+    y_train = np.array(dummy_labels)
+    
+    model = train_model(X_train, y_train)
+    with open('model.pkl', 'wb') as f:
+        pickle.dump(model, f)
+    with open('vectorizer.pkl', 'wb') as f:
+        pickle.dump(vectorizer, f)
+
 while True:
-    # Mendapatkan berita dari satu hari terakhir
     articles = get_news(keywords, page_size=5)
 
     if articles:
@@ -84,21 +140,16 @@ while True:
                 print(f"Sentiment (VADER): {sentiment}")
                 print("---")
 
-            # Membuat keputusan trading
-            decision, percentage, total_compound = make_trading_decision(sentiments)
-            print(f"Trading Decision: {decision}")
-            print(f"Confidence Percentage: {percentage:.2f}%")
-            print(f"Total Compound Sentiment: {total_compound:.4f}")
+            X_test, _ = extract_features(relevant_articles, vectorizer)
 
-            # Implementasikan eksekusi trading berdasarkan keputusan
-            # Misalnya, eksekusi order di Binance API
-            
+            decision, confidence_percentage = make_trading_decision_with_model(model, X_test)
+            print(f"Trading Decision: {decision}")
+            print(f"Confidence Percentage: {confidence_percentage:.2f}%")
+
             if decision == "Buy":
-                # Panggil fungsi untuk membeli DOGE
                 print("Executing Buy trade...")
                 # buy_doge()
             elif decision == "Sell":
-                # Panggil fungsi untuk menjual DOGE
                 print("Executing Sell trade...")
                 # sell_doge()
             else:
@@ -106,7 +157,6 @@ while True:
         else:
             print("No relevant articles found.")
     else:
-        print("Tidak ada artikel ditemukan.")
+        print("No articles found.")
 
-    # Tunggu 1 jam sebelum loop berikutnya
     time.sleep(3600)

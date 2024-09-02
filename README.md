@@ -1,13 +1,6 @@
 #requirements
 ##install def ta-lib :
-1. wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-2. tar -xzf ta-lib-0.4.0-src.tar.gz
-3. cd ta-lib
-4. ./configure --prefix=/usr
-5. make
-6. sudo make install
-7.  pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance hmmlearn
-8.  
+1. wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && tar -xzf ta-lib-0.4.0-src.tar.gz && cd ta-lib && ./configure --prefix=/usr && make && sudo make install && pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance hmmlearn
 
 ##instal def python
  

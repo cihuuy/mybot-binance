@@ -184,9 +184,11 @@ def make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler):
     stop_loss = current_price * (1 - stop_loss_pct) if 'stop_loss_enabled' in locals() and stop_loss_enabled else None
     take_profit = current_price * (1 + take_profit_pct) if 'take_profit_enabled' in locals() and take_profit_enabled else None
     
+    print(f"Stop Loss: {stop_loss}, Take Profit: {take_profit}")
+    
     return final_decision, stop_loss, take_profit
 
-# Fungsi untuk mengeksekusi perdagangan menggunakan Binance API
+# Fungsi untuk mengeksekusi perdagangan berdasarkan keputusan
 def execute_trade(decision, stop_loss, take_profit, symbol, client):
     print(f"Mengeksekusi perdagangan: {decision} untuk {symbol}")
     
@@ -198,7 +200,8 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
             
             # Hitung jumlah yang dapat dibeli berdasarkan balance yang tersedia
             symbol_info = client.get_symbol_info(symbol)
-            min_qty = float(symbol_info['filters'][2]['minQty'])
+            lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
+            min_qty = float(lot_size_filter['minQty'])
             last_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
             quantity = available_balance / last_price
             
@@ -232,33 +235,44 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
     except Exception as e:
         print(f"Error: {e}")
 
-# Inisialisasi Binance API client
+# Main trading loop
+def main_trading_loop(symbol, client, interval=900):
+    while True:
+        try:
+            # Mendapatkan data pasar
+            market_data = get_market_data(symbol, client)
+
+            # Menambahkan indikator teknis
+            market_data_with_indicators = add_technical_indicators(market_data)
+
+            # Memuat atau melatih model AI
+            gb_model, gb_scaler = load_model_and_scaler()
+            if gb_model is None or gb_scaler is None:
+                gb_model, gb_scaler, _ = train_ai_model(market_data_with_indicators)
+
+            # Backtest model
+            backtest_accuracy = backtest_model(market_data_with_indicators, gb_model, gb_scaler)
+
+            # Melatih model HMM
+            hmm_model, hmm_scaler = train_hmm(market_data[['Close']], n_components=2)
+
+            # Membuat keputusan perdagangan
+            final_decision, stop_loss, take_profit = make_trade_decision(market_data_with_indicators, gb_model, gb_scaler, hmm_model, hmm_scaler)
+
+            # Mengeksekusi perdagangan berdasarkan keputusan
+            execute_trade(final_decision, stop_loss, take_profit, symbol, client)
+
+        except Exception as e:
+            print(f"Error during trading loop: {e}")
+        
+        # Tunggu selama interval sebelum melakukan perdagangan berikutnya
+        time.sleep(interval)
+
+# Pengaturan dan inisialisasi
 api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
 api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+symbol = 'DOGEUSDT'
 client = Client(api_key, api_secret)
 
-# Simbol perdagangan
-symbol = 'DOGEUSDT'
-
-# Mendapatkan data pasar
-market_data = get_market_data(symbol, client)
-
-# Menambahkan indikator teknis
-market_data_with_indicators = add_technical_indicators(market_data)
-
-# Memuat atau melatih model AI
-gb_model, gb_scaler = load_model_and_scaler()
-if gb_model is None or gb_scaler is None:
-    gb_model, gb_scaler, _ = train_ai_model(market_data_with_indicators)
-
-# Backtest model
-backtest_accuracy = backtest_model(market_data_with_indicators, gb_model, gb_scaler)
-
-# Melatih model HMM
-hmm_model, hmm_scaler = train_hmm(market_data[['Close']], n_components=2)
-
-# Membuat keputusan perdagangan
-final_decision, stop_loss, take_profit = make_trade_decision(market_data_with_indicators, gb_model, gb_scaler, hmm_model, hmm_scaler)
-
-# Mengeksekusi perdagangan berdasarkan keputusan
-execute_trade(final_decision, stop_loss, take_profit, symbol, client)
+# Menjalankan trading loop
+main_trading_loop(symbol, client)

@@ -193,17 +193,22 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
     print(f"Mengeksekusi perdagangan: {decision} untuk {symbol}")
     
     try:
+        symbol_info = client.get_symbol_info(symbol)
+        lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
+        min_qty = float(lot_size_filter['minQty'])
+        step_size = float(lot_size_filter['stepSize'])
+        
         if decision == 'Buy':
             # Dapatkan balance yang tersedia
             balance = client.get_asset_balance(asset='USDT')
             available_balance = float(balance['free'])
             
             # Hitung jumlah yang dapat dibeli berdasarkan balance yang tersedia
-            symbol_info = client.get_symbol_info(symbol)
-            lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
-            min_qty = float(lot_size_filter['minQty'])
             last_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
             quantity = available_balance / last_price
+            
+            # Adjust the quantity to be within LOT_SIZE constraints
+            quantity = max(min_qty, round(quantity / step_size) * step_size)
             
             if quantity >= min_qty:
                 print(f"Menempatkan order beli untuk {symbol} dengan jumlah {quantity}...")
@@ -214,26 +219,33 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
                 print("Order berhasil ditempatkan:", order)
             else:
                 print("Tidak cukup balance untuk melakukan pembelian.")
+                
         elif decision == 'Sell':
             # Dapatkan balance koin yang akan dijual
             balance = client.get_asset_balance(asset=symbol.replace('USDT', ''))
             available_balance = float(balance['free'])
             
-            if available_balance > 0:
-                print(f"Menempatkan order jual untuk {symbol} dengan jumlah {available_balance}...")
+            # Adjust the quantity to be within LOT_SIZE constraints
+            quantity = max(min_qty, round(available_balance / step_size) * step_size)
+            
+            if quantity >= min_qty:
+                print(f"Menempatkan order jual untuk {symbol} dengan jumlah {quantity}...")
                 order = client.order_market_sell(
                     symbol=symbol,
-                    quantity=available_balance
+                    quantity=quantity
                 )
                 print("Order berhasil ditempatkan:", order)
             else:
                 print("Tidak ada koin yang dapat dijual.")
+                
         else:
             print("Keputusan adalah Hold. Tidak ada tindakan yang dilakukan.")
+            
     except BinanceAPIException as e:
         print(f"Binance API Error: {e}")
     except Exception as e:
         print(f"Error: {e}")
+
 
 # Main trading loop
 def main_trading_loop(symbol, client, interval=900):

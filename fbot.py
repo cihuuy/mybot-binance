@@ -205,6 +205,10 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
         last_close_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
         min_notional = get_min_notional(symbol, client)
 
+        # Pastikan min_notional ditemukan
+        if min_notional is None:
+            raise ValueError("Nilai notional minimum tidak ditemukan.")
+        
         # Hitung ukuran order
         order_size = balance  # Atau Anda dapat menggunakan perhitungan lain
         notional = order_size * last_close_price
@@ -237,6 +241,8 @@ def execute_trade(decision, stop_loss, take_profit, symbol, client):
                 quantity=order_size
             )
     except BinanceAPIException as e:
+        print(f"Error saat menempatkan order: {e}")
+    except ValueError as e:
         print(f"Error saat menempatkan order: {e}")
     except Exception as e:
         print(f"Error saat mengeksekusi perdagangan: {e}")

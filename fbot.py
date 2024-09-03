@@ -11,6 +11,7 @@ import numpy as np
 import talib
 import pickle
 import time
+import pytz
 
 # Fungsi untuk mendapatkan data pasar dari Binance API
 def get_market_data(symbol, client, interval='15m', limit=1000):
@@ -179,112 +180,95 @@ def make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler):
     
     # Menghitung stop_loss dan take_profit
     stop_loss_pct = gb_model.predict_proba(X_scaled[-1:])[0][1] * 0.02
-    take_profit_pct = gb_model.predict_proba(X_scaled[-1:])[0][0] * 0.02
-    current_price = data['Close'].iloc[-1]
-    stop_loss = current_price * (1 - stop_loss_pct) if 'stop_loss_enabled' in locals() and stop_loss_enabled else None
-    take_profit = current_price * (1 + take_profit_pct) if 'take_profit_enabled' in locals() and take_profit_enabled else None
-    
-    print(f"Stop Loss: {stop_loss}, Take Profit: {take_profit}")
+    take_profit_pct = gb_model.predict_proba(X_scaled[-1:])[0][0] * 0.03
+    last_close_price = data['Close'].iloc[-1]
+    stop_loss = last_close_price * (1 - stop_loss_pct) if stop_loss_enabled else None
+    take_profit = last_close_price * (1 + take_profit_pct) if take_profit_enabled else None
     
     return final_decision, stop_loss, take_profit
 
-# Fungsi untuk mengeksekusi perdagangan berdasarkan keputusan
+# Fungsi untuk mendapatkan nilai notional minimum
+def get_min_notional(symbol, client):
+    exchange_info = client.get_exchange_info()
+    for s in exchange_info['symbols']:
+        if s['symbol'] == symbol:
+            for f in s['filters']:
+                if f['filterType'] == 'MIN_NOTIONAL':
+                    return float(f['minNotional'])
+    return None
+
+# Fungsi untuk mengeksekusi perdagangan
 def execute_trade(decision, stop_loss, take_profit, symbol, client):
-    print(f"Mengeksekusi perdagangan: {decision} untuk {symbol}")
-    
     try:
-        symbol_info = client.get_symbol_info(symbol)
-        lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
-        min_qty = float(lot_size_filter['minQty'])
-        step_size = float(lot_size_filter['stepSize'])
+        # Dapatkan saldo dan notional minimum
+        balance = float(client.get_asset_balance(asset='DOGE')['free'])
+        last_close_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
+        min_notional = get_min_notional(symbol, client)
+
+        # Hitung ukuran order
+        order_size = balance  # Atau Anda dapat menggunakan perhitungan lain
+        notional = order_size * last_close_price
+
+        # Pastikan notional memenuhi minimum notional
+        if notional < min_notional:
+            order_size = min_notional / last_close_price
+            if order_size * last_close_price < min_notional:
+                print(f"Order size terlalu kecil untuk memenuhi minimum notional. Minimum yang diperlukan: {min_notional}")
+                return
         
         if decision == 'Buy':
-            # Dapatkan balance yang tersedia
-            balance = client.get_asset_balance(asset='USDT')
-            available_balance = float(balance['free'])
-            
-            # Hitung jumlah yang dapat dibeli berdasarkan balance yang tersedia
-            last_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-            quantity = available_balance / last_price
-            
-            # Adjust the quantity to be within LOT_SIZE constraints
-            quantity = max(min_qty, round(quantity / step_size) * step_size)
-            
-            if quantity >= min_qty:
-                print(f"Menempatkan order beli untuk {symbol} dengan jumlah {quantity}...")
-                order = client.order_market_buy(
+            print(f"Menempatkan order beli {symbol}")
+            order = client.order_market_buy(
+                symbol=symbol,
+                quantity=order_size
+            )
+            if stop_loss and take_profit:
+                print(f"Menambahkan order stop loss pada {stop_loss} dan take profit pada {take_profit}")
+                client.order_oco_sell(
                     symbol=symbol,
-                    quantity=quantity
+                    quantity=order_size,
+                    price=take_profit,
+                    stopPrice=stop_loss
                 )
-                print("Order berhasil ditempatkan:", order)
-            else:
-                print("Tidak cukup balance untuk melakukan pembelian.")
-                
         elif decision == 'Sell':
-            # Dapatkan balance koin yang akan dijual
-            balance = client.get_asset_balance(asset=symbol.replace('USDT', ''))
-            available_balance = float(balance['free'])
-            
-            # Adjust the quantity to be within LOT_SIZE constraints
-            quantity = max(min_qty, round(available_balance / step_size) * step_size)
-            
-            if quantity >= min_qty:
-                print(f"Menempatkan order jual untuk {symbol} dengan jumlah {quantity}...")
-                order = client.order_market_sell(
-                    symbol=symbol,
-                    quantity=quantity
-                )
-                print("Order berhasil ditempatkan:", order)
-            else:
-                print("Tidak ada koin yang dapat dijual.")
-                
-        else:
-            print("Keputusan adalah Hold. Tidak ada tindakan yang dilakukan.")
-            
+            print(f"Menempatkan order jual {symbol}")
+            order = client.order_market_sell(
+                symbol=symbol,
+                quantity=order_size
+            )
     except BinanceAPIException as e:
-        print(f"Binance API Error: {e}")
+        print(f"Error saat menempatkan order: {e}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error saat mengeksekusi perdagangan: {e}")
 
+# Fungsi utama untuk menjalankan bot trading
+def main():
+    # Inisialisasi API Binance
+    api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
+    api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
+    client = Client(api_key, api_secret)
+    
+    # Mengunduh dan menyiapkan data
+    symbol = 'DOGEUSDT'
+    data = get_market_data(symbol, client)
+    data = add_technical_indicators(data)
+    
+    # Melatih atau memuat model AI
+    gb_model, gb_scaler = load_model_and_scaler()
+    if gb_model is None:
+        gb_model, gb_scaler, _ = train_ai_model(data)
+    
+    # Melatih model HMM
+    hmm_model, hmm_scaler = train_hmm(data[['Close']], n_components=3)
+    
+    # Backtesting model
+    backtest_model(data, gb_model, gb_scaler)
+    
+    # Menentukan keputusan perdagangan
+    decision, stop_loss, take_profit = make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler)
+    
+    # Mengeksekusi perdagangan
+    execute_trade(decision, stop_loss, take_profit, symbol, client)
 
-# Main trading loop
-def main_trading_loop(symbol, client, interval=900):
-    while True:
-        try:
-            # Mendapatkan data pasar
-            market_data = get_market_data(symbol, client)
-
-            # Menambahkan indikator teknis
-            market_data_with_indicators = add_technical_indicators(market_data)
-
-            # Memuat atau melatih model AI
-            gb_model, gb_scaler = load_model_and_scaler()
-            if gb_model is None or gb_scaler is None:
-                gb_model, gb_scaler, _ = train_ai_model(market_data_with_indicators)
-
-            # Backtest model
-            backtest_accuracy = backtest_model(market_data_with_indicators, gb_model, gb_scaler)
-
-            # Melatih model HMM
-            hmm_model, hmm_scaler = train_hmm(market_data[['Close']], n_components=2)
-
-            # Membuat keputusan perdagangan
-            final_decision, stop_loss, take_profit = make_trade_decision(market_data_with_indicators, gb_model, gb_scaler, hmm_model, hmm_scaler)
-
-            # Mengeksekusi perdagangan berdasarkan keputusan
-            execute_trade(final_decision, stop_loss, take_profit, symbol, client)
-
-        except Exception as e:
-            print(f"Error during trading loop: {e}")
-        
-        # Tunggu selama interval sebelum melakukan perdagangan berikutnya
-        time.sleep(interval)
-
-# Pengaturan dan inisialisasi
-api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
-api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
-symbol = 'DOGEUSDT'
-client = Client(api_key, api_secret)
-
-# Menjalankan trading loop
-main_trading_loop(symbol, client)
+if __name__ == "__main__":
+    main()

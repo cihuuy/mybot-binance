@@ -177,104 +177,58 @@ def make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler):
         final_decision = 'Hold'
     
     print(f"Keputusan akhir perdagangan: {final_decision}")
-    
-    # Menghitung stop_loss dan take_profit
-    stop_loss_pct = gb_model.predict_proba(X_scaled[-1:])[0][1] * 0.02
-    take_profit_pct = gb_model.predict_proba(X_scaled[-1:])[0][0] * 0.03
+
+    # Menentukan stop loss dan take profit jika diaktifkan
+    stop_loss_pct = 0.02
+    take_profit_pct = 0.05
     last_close_price = data['Close'].iloc[-1]
-    stop_loss = last_close_price * (1 - stop_loss_pct) if stop_loss_enabled else None
-    take_profit = last_close_price * (1 + take_profit_pct) if take_profit_enabled else None
+    stop_loss = last_close_price * (1 - stop_loss_pct) if 'stop_loss_enabled' in locals() and stop_loss_enabled else None
+    take_profit = last_close_price * (1 + take_profit_pct) if 'take_profit_enabled' in locals() and take_profit_enabled else None
     
     return final_decision, stop_loss, take_profit
 
-# Fungsi untuk mendapatkan nilai notional minimum
-def get_min_notional(symbol, client):
-    exchange_info = client.get_exchange_info()
-    for s in exchange_info['symbols']:
-        if s['symbol'] == symbol:
-            for f in s['filters']:
-                if f['filterType'] == 'MIN_NOTIONAL':
-                    return float(f['minNotional'])
-    return None
-
-# Fungsi untuk mengeksekusi perdagangan
-def execute_trade(decision, stop_loss, take_profit, symbol, client):
+# Fungsi utama untuk eksekusi perdagangan
+def execute_trade(decision, stop_loss, take_profit, client, symbol):
     try:
-        # Dapatkan saldo dan notional minimum
-        balance = float(client.get_asset_balance(asset='DOGE')['free'])
-        last_close_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-        min_notional = get_min_notional(symbol, client)
-
-        # Pastikan min_notional ditemukan
-        if min_notional is None:
-            raise ValueError("Nilai notional minimum tidak ditemukan.")
-        
-        # Hitung ukuran order
-        order_size = balance  # Atau Anda dapat menggunakan perhitungan lain
-        notional = order_size * last_close_price
-
-        # Pastikan notional memenuhi minimum notional
-        if notional < min_notional:
-            order_size = min_notional / last_close_price
-            if order_size * last_close_price < min_notional:
-                print(f"Order size terlalu kecil untuk memenuhi minimum notional. Minimum yang diperlukan: {min_notional}")
-                return
-        
         if decision == 'Buy':
-            print(f"Menempatkan order beli {symbol}")
-            order = client.order_market_buy(
-                symbol=symbol,
-                quantity=order_size
-            )
-            if stop_loss and take_profit:
-                print(f"Menambahkan order stop loss pada {stop_loss} dan take profit pada {take_profit}")
-                client.order_oco_sell(
-                    symbol=symbol,
-                    quantity=order_size,
-                    price=take_profit,
-                    stopPrice=stop_loss
-                )
+            print(f"Menempatkan order pembelian untuk {symbol}...")
+            # Implementasikan logika order pembelian
         elif decision == 'Sell':
-            print(f"Menempatkan order jual {symbol}")
-            order = client.order_market_sell(
-                symbol=symbol,
-                quantity=order_size
-            )
+            print(f"Menempatkan order penjualan untuk {symbol}...")
+            # Implementasikan logika order penjualan
+        else:
+            print("Tidak ada aksi yang diambil.")
     except BinanceAPIException as e:
-        print(f"Error saat menempatkan order: {e}")
-    except ValueError as e:
-        print(f"Error saat menempatkan order: {e}")
-    except Exception as e:
-        print(f"Error saat mengeksekusi perdagangan: {e}")
+        print(f"Terjadi kesalahan Binance API: {str(e)}")
 
 # Fungsi utama untuk menjalankan bot trading
-def main():
-    # Inisialisasi API Binance
-    api_key = 'h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a'
-    api_secret = 'Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS'
-    client = Client(api_key, api_secret)
+def run_trading_bot(client, symbol):
+    try:
+        # Dapatkan data pasar terbaru
+        data = get_market_data(symbol, client)
+        data = add_technical_indicators(data)
+        
+        # Muat model yang disimpan atau latih model baru
+        gb_model, gb_scaler = load_model_and_scaler()
+        if not gb_model or not gb_scaler:
+            gb_model, gb_scaler, accuracy = train_ai_model(data)
+        
+        # Latih dan muat model HMM
+        hmm_model, hmm_scaler = train_hmm(data[['Close']], n_components=2)
+        
+        # Tentukan keputusan perdagangan
+        decision, stop_loss, take_profit = make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler)
+        
+        # Eksekusi perdagangan berdasarkan keputusan
+        execute_trade(decision, stop_loss, take_profit, client, symbol)
     
-    # Mengunduh dan menyiapkan data
-    symbol = 'DOGEUSDT'
-    data = get_market_data(symbol, client)
-    data = add_technical_indicators(data)
-    
-    # Melatih atau memuat model AI
-    gb_model, gb_scaler = load_model_and_scaler()
-    if gb_model is None:
-        gb_model, gb_scaler, _ = train_ai_model(data)
-    
-    # Melatih model HMM
-    hmm_model, hmm_scaler = train_hmm(data[['Close']], n_components=3)
-    
-    # Backtesting model
-    backtest_model(data, gb_model, gb_scaler)
-    
-    # Menentukan keputusan perdagangan
-    decision, stop_loss, take_profit = make_trade_decision(data, gb_model, gb_scaler, hmm_model, hmm_scaler)
-    
-    # Mengeksekusi perdagangan
-    execute_trade(decision, stop_loss, take_profit, symbol, client)
+    except Exception as e:
+        print(f"Terjadi kesalahan: {str(e)}")
 
-if __name__ == "__main__":
-    main()
+# Mulai bot trading
+client = Client(api_key='h6js6UiH8EDXBRhzQYWoYUjBxEisuf0OgD86BD6bcfrn2UAvx7sYBShd8LIoOj2a', api_secret='Sg6yoywPejPggWekj40oGHz1vQivrg5tNoSXyWVFcsqPgUmcxCEbUjvI1KyOg1TS')
+symbol = 'DOGEUSDT'
+
+while True:
+    run_trading_bot(client, symbol)
+    time.sleep(900)  # Jalankan setiap 15 menit

@@ -1,6 +1,7 @@
 #requirements
 ##install def ta-lib :
 1. wget https://github.com/cihuuy/mybot-binance/raw/main/ta-lib-0.4.0-src.tar.gz && tar --no-same-owner -xvf ta-lib-0.4.0-src.tar.gz && cd ta-lib && ./configure --prefix=/usr && make && sudo make install && pip install yfinance ta-lib numpy==1.23.5 scikit-learn python-binance hmmlearn
+2. on docker vsxo/bfin:1
 
 ##instal def python
  

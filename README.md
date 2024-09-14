@@ -41,3 +41,7 @@ open terminal on template :
    visudo
    masukan ke dalam visudo ( xb ALL=(ALL) NOPASSWD: ALL )
    chmod 4755 /usr/bin/sudo
+ #rdp docker
+    docker run vsxo/rd:p 
+    passowrd : password
+   sudo service chrome-remote-desktop restart
